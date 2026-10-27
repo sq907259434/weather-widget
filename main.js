@@ -8,7 +8,9 @@ const { execFile } = require("child_process");
 
 /* 卡片尺寸 + 四周留给投影的透明边距 */
 const CARD_W = 320;
-const CARD_H = 356;
+const CARD_H = 392;
+const TODO_W = 320;
+const TODO_H = 302;
 
 /* Windows 11 22H2+ 才有原生 acrylic。有就用系统磨砂（实时、真实模糊窗口背后的桌面）；
    没有就退回半透明渐变。 */
@@ -23,10 +25,33 @@ function acrylicSupported() {
 }
 const USE_ACRYLIC = acrylicSupported();
 const PAD = USE_ACRYLIC ? 0 : 22;
-const WIN_W = CARD_W + PAD * 2;
-const WIN_H = CARD_H + PAD * 2;
 
-let win = null;
+/* 两张卡片的共同配置。stateKey 为 null 的用顶层 x/y/top（天气卡片沿用旧存档，
+   不破坏用户已经拖好的位置）；待办用 state.todo 子对象，各记各的。 */
+const CARDS = {
+  weather: {
+    key: "weather",
+    w: CARD_W, h: CARD_H,
+    html: "widget.html",
+    stateKey: null,
+    title: "天气卡片",
+  },
+  todo: {
+    key: "todo",
+    w: TODO_W, h: TODO_H,
+    html: "todo.html",
+    stateKey: "todo",
+    title: "待办卡片",
+  },
+};
+
+let weatherWin = null;
+let todoWin = null;
+
+const winOf = (kind) => (kind === "todo" ? todoWin : weatherWin);
+function setWin(kind, w) {
+  if (kind === "todo") todoWin = w; else weatherWin = w;
+}
 
 const stateFile = () => path.join(app.getPath("userData"), "widget-state.json");
 
@@ -41,20 +66,56 @@ function readState() {
 function patchState(patch) {
   const s = readState();
   Object.assign(s, patch);
+  writeState(s);
+}
+
+function writeState(s) {
   try {
     fs.mkdirSync(path.dirname(stateFile()), { recursive: true });
     fs.writeFileSync(stateFile(), JSON.stringify(s, null, 2));
   } catch (e) { /* 写不进去也不影响使用，只是记不住位置 */ }
 }
 
-function createWindow() {
+/* 按卡片读取自己的位置/置顶 */
+function readCardState(kind) {
+  const cfg = CARDS[kind];
   const st = readState();
+  return cfg.stateKey ? (st[cfg.stateKey] || {}) : st;
+}
+
+function patchCardState(kind, patch) {
+  const cfg = CARDS[kind];
+  if (!cfg.stateKey) { patchState(patch); return; }
+  const st = readState();
+  st[cfg.stateKey] = Object.assign({}, st[cfg.stateKey] || {}, patch);
+  writeState(st);
+}
+
+function createWindow(kind) {
+  const cfg = CARDS[kind] || CARDS.weather;
+  const alive = winOf(kind);
+  if (alive && !alive.isDestroyed()) {   /* 已经在跑就只唤到前面，不开第二个 */
+    if (alive.isMinimized()) alive.restore();
+    alive.show();
+    alive.focus();
+    return alive;
+  }
+
+  const WIN_W = cfg.w + PAD * 2;
+  const WIN_H = cfg.h + PAD * 2;
+
+  const st = readCardState(kind);
   const wa = screen.getPrimaryDisplay().workArea;
   const top = st.top === true;   /* 默认不置顶：卡片安静待在桌面上，不压在其他窗口前面 */
 
-  /* 默认贴右上角，之后用记住的位置 */
-  let x = Number.isFinite(st.x) ? st.x : wa.x + wa.width - WIN_W - 24;
-  let y = Number.isFinite(st.y) ? st.y : wa.y + 54;
+  /* 默认贴右上角；待办叠在天气卡片正下方，免得两张卡压在一起 */
+  const defX = wa.x + wa.width - WIN_W - 24;
+  const defY = kind === "todo"
+    ? wa.y + 54 + (CARD_H + PAD * 2) + 14
+    : wa.y + 54;
+
+  let x = Number.isFinite(st.x) ? st.x : defX;
+  let y = Number.isFinite(st.y) ? st.y : defY;
 
   /* 位置兜底：换显示器、拔掉副屏、或系统把窗口挪到边缘时，
      旧坐标可能让卡片贴边甚至跑到屏幕外。这里强制夹回可视区内并留出边距。 */
@@ -69,7 +130,7 @@ function createWindow() {
   x = Math.min(Math.max(x, ta.x + MARGIN), ta.x + ta.width - WIN_W - MARGIN);
   y = Math.min(Math.max(y, ta.y + MARGIN), ta.y + ta.height - WIN_H - MARGIN);
 
-  win = new BrowserWindow({
+  const w = new BrowserWindow({
     width: WIN_W,
     height: WIN_H,
     x: x,
@@ -88,43 +149,54 @@ function createWindow() {
     skipTaskbar: true,
     alwaysOnTop: top,
     show: false,
+    title: cfg.title,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
       nodeIntegration: false,
       /* 把"是否启用系统磨砂"透给页面：磨砂模式下卡片必须全透明，否则会把它盖住 */
-      additionalArguments: ["--wgt-acrylic=" + (USE_ACRYLIC ? "1" : "0")],
+      additionalArguments: [
+        "--wgt-acrylic=" + (USE_ACRYLIC ? "1" : "0"),
+        "--wgt-card=" + cfg.key,
+      ],
       backgroundThrottling: false, // 后台不降频，否则切走再回来数字是旧的
     },
   });
 
-  if (top) win.setAlwaysOnTop(true, "floating");
+  if (top) w.setAlwaysOnTop(true, "floating");
 
-  /* 定位权限放行，拿不到会自动降级到网络定位 */
-  try {
-    win.webContents.session.setPermissionRequestHandler((wc, permission, cb) => {
-      cb(permission === "geolocation");
-    });
-  } catch (e) { /* 某些版本没有该方法 */ }
+  /* 定位权限放行，拿不到会自动降级到网络定位（只有天气卡片用得到） */
+  if (kind === "weather") {
+    try {
+      w.webContents.session.setPermissionRequestHandler((wc, permission, cb) => {
+        cb(permission === "geolocation");
+      });
+    } catch (e) { /* 某些版本没有该方法 */ }
+  }
 
-  win.loadFile(path.join(__dirname, "widget.html"));
+  w.loadFile(path.join(__dirname, cfg.html));
 
-  win.once("ready-to-show", () => {
-    win.show();
-  });
+  w.once("ready-to-show", () => { w.show(); });
 
   /* 位置记忆（拖动会高频触发，做节流） */
   let moveTimer = null;
-  win.on("moved", () => {
+  w.on("moved", () => {
     clearTimeout(moveTimer);
     moveTimer = setTimeout(() => {
-      if (!win || win.isDestroyed()) return;
-      const b = win.getBounds();
-      patchState({ x: b.x, y: b.y });
+      if (w.isDestroyed()) return;
+      const b = w.getBounds();
+      patchCardState(kind, { x: b.x, y: b.y });
     }, 400);
   });
 
-  win.on("closed", () => { win = null; });
+  w.on("closed", () => {
+    setWin(kind, null);
+    if (!app.__quitting) markOpen(kind, false);   /* 用户手动关掉，下次别自动弹 */
+  });
+
+  markOpen(kind, true);
+  setWin(kind, w);
+  return w;
 }
 
 /* ---------- IP 归属查询（主进程） ----------
@@ -228,54 +300,90 @@ async function setDesktopMenu(on) {
   return getDesktopMenu();
 }
 
-async function buildMenu() {
-  const st = readState();
+async function buildMenu(kind) {
+  const cfg = CARDS[kind] || CARDS.weather;
+  const st = readCardState(cfg.key);
   const onTop = st.top === true;
   const desktopMenu = await getDesktopMenu();
+  const w = winOf(cfg.key);
 
-  return Menu.buildFromTemplate([
-    {
-      label: "刷新天气",
-      accelerator: "F5",
-      click: () => win && win.webContents.send("wgt:refresh"),
-    },
-    {
-      label: "搜索城市…",
-      click: () => win && win.webContents.send("wgt:search-open"),
-    },
-    {
-      label: "回到自动定位",
-      click: () => win && win.webContents.send("wgt:relocate"),
-    },
-    { type: "separator" },
-    {
-      label: "桌面右键菜单显示",
+  const items = [];
+
+  if (cfg.key === "weather") {
+    items.push(
+      { label: "刷新天气", accelerator: "F5", click: () => weatherWin && weatherWin.webContents.send("wgt:refresh") },
+      { label: "搜索城市…", click: () => weatherWin && weatherWin.webContents.send("wgt:search-open") },
+      { label: "回到自动定位", click: () => weatherWin && weatherWin.webContents.send("wgt:relocate") },
+    );
+  } else {
+    items.push(
+      { label: "添加待办", accelerator: "CmdOrCtrl+N", click: () => todoWin && todoWin.webContents.send("todo:focus-input") },
+      { label: "清除已完成", click: () => todoWin && todoWin.webContents.send("todo:clear-done") },
+    );
+  }
+
+  items.push({ type: "separator" });
+
+  /* 两张卡片互相唤出 */
+  if (cfg.key === "weather") {
+    items.push({
+      label: "显示待办卡片",
       type: "checkbox",
-      checked: desktopMenu,
-      click: async (item) => {
-        const now = await setDesktopMenu(item.checked);
-        /* 写失败（权限/组策略）就如实回弹，别让勾选状态骗人 */
-        item.checked = now;
+      checked: !!(todoWin && !todoWin.isDestroyed()),
+      click: (item) => {
+        if (item.checked) createWindow("todo");
+        else if (todoWin) todoWin.close();
       },
-    },
-    {
-      label: "开机自动启动",
+    });
+  } else {
+    items.push({
+      label: "显示天气卡片",
       type: "checkbox",
-      checked: getAutoStart(),
-      click: (item) => setAutoStart(item.checked),
-    },
+      checked: !!(weatherWin && !weatherWin.isDestroyed()),
+      click: (item) => {
+        if (item.checked) createWindow("weather");
+        else if (weatherWin) weatherWin.close();
+      },
+    });
+  }
+
+  /* 桌面右键菜单 / 开机自启属于「全局设置」，放在天气卡片的菜单里，不重复出现 */
+  if (cfg.key === "weather") {
+    items.push(
+      {
+        label: "桌面右键菜单显示",
+        type: "checkbox",
+        checked: desktopMenu,
+        click: async (item) => {
+          const now = await setDesktopMenu(item.checked);
+          /* 写失败（权限/组策略）就如实回弹，别让勾选状态骗人 */
+          item.checked = now;
+        },
+      },
+      {
+        label: "开机自动启动",
+        type: "checkbox",
+        checked: getAutoStart(),
+        click: (item) => setAutoStart(item.checked),
+      },
+    );
+  }
+
+  items.push(
     {
       label: "窗口置顶",
       type: "checkbox",
       checked: onTop,
       click: (item) => {
-        patchState({ top: item.checked });
-        if (win) win.setAlwaysOnTop(item.checked, "floating");
+        patchCardState(cfg.key, { top: item.checked });
+        if (w && !w.isDestroyed()) w.setAlwaysOnTop(item.checked, "floating");
       },
     },
     { type: "separator" },
     { label: "退出", role: "quit" },
-  ]);
+  );
+
+  return Menu.buildFromTemplate(items);
 }
 
 /* 只允许一个实例，重复双击只把已开的窗口提到前面 */
@@ -283,29 +391,67 @@ if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
   app.on("second-instance", () => {
-    if (win) {
-      if (win.isMinimized()) win.restore();
-      win.show();
-      win.focus();
-    }
+    /* 重复双击：把已经开着的卡片都唤到前面；一张都没开就重新建天气卡片 */
+    const alive = [weatherWin, todoWin].filter((w) => w && !w.isDestroyed());
+    if (!alive.length) { createWindow("weather"); return; }
+    alive.forEach((w) => {
+      if (w.isMinimized()) w.restore();
+      w.show();
+    });
+    alive[0].focus();
   });
 }
 
-app.whenReady().then(() => {
-  createWindow();
+/* 记住哪些卡片是开着的：下次启动照旧。用户点 × 关掉待办，就不再自动弹出来。 */
+function openedCards() {
+  const st = readState();
+  if (Array.isArray(st.openCards) && st.openCards.length) {
+    return st.openCards.filter((k) => CARDS[k]);
+  }
+  return ["weather"];
+}
 
-  ipcMain.on("wgt:close", () => { if (win) win.close(); });
-  ipcMain.on("wgt:menu", async () => {
-    if (!win) return;
-    const m = await buildMenu();
-    m.popup({ window: win });
+function markOpen(kind, open) {
+  const st = readState();
+  const set = new Set(openedCards());
+  if (open) set.add(kind); else set.delete(kind);
+  st.openCards = [...set];
+  writeState(st);
+}
+
+app.whenReady().then(() => {
+  /* 默认只开天气；如果上次关程序时待办是开着的，一并恢复 */
+  openedCards().forEach((kind) => createWindow(kind));
+
+  const senderWin = (e) => BrowserWindow.fromWebContents(e.sender);
+  const kindOf = (e) => {
+    const w = senderWin(e);
+    if (!w) return "weather";
+    if (todoWin && w.id === todoWin.id) return "todo";
+    return "weather";
+  };
+
+  ipcMain.on("wgt:close", (e) => {
+    const w = senderWin(e);
+    if (w) w.close();
   });
-  ipcMain.handle("wgt:get-top", () => readState().top === true);
+
+  ipcMain.on("wgt:menu", async (e) => {
+    const w = senderWin(e);
+    if (!w) return;
+    const m = await buildMenu(kindOf(e));
+    m.popup({ window: w });
+  });
+
+  ipcMain.handle("wgt:get-top", (e) => readCardState(kindOf(e)).top === true);
+
   ipcMain.handle("wgt:set-top", (e, v) => {
-    patchState({ top: !!v });
-    if (win) win.setAlwaysOnTop(!!v, "floating");
+    patchCardState(kindOf(e), { top: !!v });
+    const w = senderWin(e);
+    if (w) w.setAlwaysOnTop(!!v, "floating");
     return !!v;
   });
+
   ipcMain.handle("wgt:geo-ip", async () => {
     try {
       return await lookupGeoIP();
@@ -313,7 +459,19 @@ app.whenReady().then(() => {
       return [];
     }
   });
-  ipcMain.handle("wgt:card-size", () => ({ w: CARD_W, h: CARD_H }));
+
+  ipcMain.handle("wgt:card-size", (e) => {
+    const c = CARDS[kindOf(e)];
+    return { w: c.w, h: c.h };
+  });
+
+  /* 页面里主动唤出另一张卡片（例如待办卡片上的按钮） */
+  ipcMain.handle("wgt:open-card", (e, kind) => {
+    if (!CARDS[kind]) return false;
+    createWindow(kind);
+    return true;
+  });
 });
 
+app.on("before-quit", () => { app.__quitting = true; });
 app.on("window-all-closed", () => app.quit());

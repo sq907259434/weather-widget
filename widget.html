@@ -89,7 +89,7 @@
     pointer-events:none;
   }
 
-  .card > .hd, .card > .main, .card > .hrs, .card > .dys, .card > .ft{
+  .card > .hd, .card > .main, .card > .hrs, .card > .mets, .card > .dys, .card > .ft{
     position:relative; z-index:3;
   }
 
@@ -165,6 +165,35 @@
   .hr.now .t{ color:#fff; font-weight:600; }
   .hr .i svg{ width:19px; height:19px; display:block; }
   .hr .v{ font-size:12px; font-weight:500; }
+
+  /* ---------- 指标条（空气 / 风 / 紫外线） ---------- */
+  .mets{
+    flex:0 0 auto; height:34px;
+    display:flex; align-items:center;
+    border-top:1px solid rgba(255,255,255,.16);
+    padding-top:5px;
+  }
+  .met{
+    flex:1 1 0; min-width:0;
+    display:flex; align-items:center; gap:4px;
+  }
+  .met svg{ width:12px; height:12px; flex:0 0 auto; opacity:.72; }
+  .met .lb{ font-size:9.5px; color:var(--ink-3); letter-spacing:.2px; white-space:nowrap; }
+  .met .vl{
+    font-size:11px; font-weight:600; letter-spacing:.1px;
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  }
+  /* 等级配色：q1~q6 = 优/良/轻度/中度/重度/严重；u1~u6 = 弱/中等/强/很强/极强 */
+  .met .vl.q1{ color:#8fe394; }
+  .met .vl.q2{ color:#8fe394; }
+  .met .vl.q3{ color:#ffd166; }
+  .met .vl.q4{ color:#ffab5e; }
+  .met .vl.q5, .met .vl.q6{ color:#ff7a7a; }
+  .met .vl.u1{ color:#a8dbc6; }
+  .met .vl.u2{ color:#e6e8a8; }
+  .met .vl.u3{ color:#ffd166; }
+  .met .vl.u4{ color:#ffab5e; }
+  .met .vl.u5, .met .vl.u6{ color:#ff7a7a; }
 
   /* ---------- 三天 ---------- */
   .dys{
@@ -284,6 +313,7 @@
   </div>
 
   <div class="hrs" id="hrs"></div>
+  <div class="mets" id="mets"></div>
   <div class="dys" id="dys"></div>
 
   <div class="ft">
@@ -314,6 +344,72 @@ const WMO = {
   95:{t:"雷阵雨",k:"thunder"}, 96:{t:"雷阵雨伴冰雹",k:"thunder"}, 99:{t:"强雷阵雨伴冰雹",k:"thunder"},
 };
 const wmo = (c) => WMO[c] || { t: "未知", k: "cloudy" };
+
+/* ================= 指标换算 ================= */
+/* 风向：度数 → 8 方位（0° = 正北，顺时针） */
+const DIRS = ["北", "东北", "东", "东南", "南", "西南", "西", "西北"];
+function windDir(deg) {
+  if (!isFinite(deg)) return "";
+  return DIRS[Math.round(((deg % 360) + 360) % 360 / 45) % 8];
+}
+
+/* 蒲福风级（km/h 上限） */
+const BEAUFORT = [1, 5, 11, 19, 28, 38, 49, 61, 74, 88, 102, 117];
+function windLevel(kmh) {
+  if (!isFinite(kmh)) return "";
+  for (let i = 0; i < BEAUFORT.length; i++) if (kmh < BEAUFORT[i]) return i + "级";
+  return "12级";
+}
+
+/* 紫外线分级（WHO） */
+function uvLevel(uv) {
+  if (!isFinite(uv)) return null;
+  if (uv < 3) return { t: "弱", c: "u1" };
+  if (uv < 6) return { t: "中等", c: "u2" };
+  if (uv < 8) return { t: "强", c: "u3" };
+  if (uv < 11) return { t: "很强", c: "u4" };
+  return { t: "极强", c: "u5" };
+}
+
+/* 中国 AQI（HJ 633-2012）：各污染物 IAQI 取最大。
+   Open-Meteo 只给美标 us_aqi，跟国产 App 的「优/良」对不上，所以本地按国标重算。 */
+const BP_PM25 = [[0,35,0,50],[35,75,50,100],[75,115,100,150],[115,150,150,200],[150,250,200,300],[250,350,300,400],[350,500,400,500]];
+const BP_PM10 = [[0,50,0,50],[50,150,50,100],[150,250,100,150],[250,350,150,200],[350,420,200,300],[420,500,300,400],[500,600,400,500]];
+const BP_O3   = [[0,100,0,50],[100,160,50,100],[160,215,100,150],[215,265,150,200],[265,800,200,300]];
+
+function iaqi(conc, bp) {
+  if (!isFinite(conc) || conc < 0) return 0;
+  for (let i = 0; i < bp.length; i++) {
+    const [cl, ch, il, ih] = bp[i];
+    if (conc <= ch) return il + (ih - il) * (Math.max(conc, cl) - cl) / (ch - cl);
+  }
+  return 500;
+}
+
+function cnAqi(air) {
+  if (!air) return null;
+  const v = Math.max(
+    iaqi(air.pm2_5, BP_PM25),
+    iaqi(air.pm10, BP_PM10),
+    iaqi(air.ozone, BP_O3)
+  );
+  const aqi = Math.round(v);
+  const lv =
+    aqi <= 50  ? { t: "优",     c: "q1" } :
+    aqi <= 100 ? { t: "良",     c: "q2" } :
+    aqi <= 150 ? { t: "轻度污染", c: "q3" } :
+    aqi <= 200 ? { t: "中度污染", c: "q4" } :
+    aqi <= 300 ? { t: "重度污染", c: "q5" } : { t: "严重污染", c: "q6" };
+  lv.aqi = aqi;
+  return lv;
+}
+
+/* 指标小图标 */
+const MET_ICON = {
+  air: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19c0-8 4.5-13 15-14 .6 6.5-2 14-9 14.5-2.6.2-6-.5-6-.5z"/><path d="M8 20c1.2-4.6 3.6-7.6 7.4-9.6"/></svg>',
+  wind: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8h9.5a2.8 2.8 0 1 0-2.8-2.8"/><path d="M3 15.5h12.8a2.6 2.6 0 1 1-2.6 2.6"/><path d="M3 11.8h6.2"/></svg>',
+  uv:  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2.6v2.2M12 19.2v2.2M4.3 4.3l1.6 1.6M18.1 18.1l1.6 1.6M2.6 12h2.2M19.2 12h2.2M4.3 19.7l1.6-1.6M18.1 5.9l1.6-1.6"/></svg>',
+};
 
 /* ================= 图标 ================= */
 let uid = 0;
@@ -657,9 +753,9 @@ async function loadWeather(lat, lon) {
   const params = [
     "latitude=" + lat.toFixed(4),
     "longitude=" + lon.toFixed(4),
-    "current=temperature_2m,apparent_temperature,is_day,weather_code,relative_humidity_2m",
-    "hourly=temperature_2m,weather_code,is_day",
-    "daily=weather_code,temperature_2m_max,temperature_2m_min",
+    "current=temperature_2m,apparent_temperature,is_day,weather_code,relative_humidity_2m,wind_speed_10m,wind_direction_10m",
+    "hourly=temperature_2m,weather_code,is_day,uv_index",
+    "daily=weather_code,temperature_2m_max,temperature_2m_min,uv_index_max",
     "timezone=auto",
     "forecast_days=4",
     "wind_speed_unit=kmh",
@@ -667,8 +763,19 @@ async function loadWeather(lat, lon) {
   return fetchJSON("https://api.open-meteo.com/v1/forecast?" + params, 12000);
 }
 
+/* 空气质量：独立接口，失败不影响主卡片 */
+async function loadAir(lat, lon) {
+  const params = [
+    "latitude=" + lat.toFixed(4),
+    "longitude=" + lon.toFixed(4),
+    "current=pm2_5,pm10,ozone,us_aqi",
+    "timezone=auto",
+  ].join("&");
+  return fetchJSON("https://air-quality-api.open-meteo.com/v1/air-quality?" + params, 9000);
+}
+
 /* ================= 渲染 ================= */
-const state = { place: null, data: null, lastUpdate: 0, loading: false, timer: null };
+const state = { place: null, data: null, air: null, lastUpdate: 0, loading: false, timer: null };
 
 function render() {
   const d = state.data;
@@ -716,6 +823,36 @@ function render() {
       '<div class="v">' + t + '°</div></div>';
   }
   $("hrs").innerHTML = hs;
+
+  /* ---- 指标条：空气质量 / 风 / 紫外线 ---- */
+  /* 空气是慢接口、且可能属于上一个城市，坐标不吻合就不采用 */
+  const a = state.air;
+  const airCur = (a && state.place &&
+    Math.abs(a.lat - state.place.lat) < 0.02 &&
+    Math.abs(a.lon - state.place.lon) < 0.02) ? a.cur : null;
+  const aqi = cnAqi(airCur);
+  const wd = windDir(cur.wind_direction_10m);
+  const wl = windLevel(cur.wind_speed_10m);
+  /* 紫外线取「当前小时」而非日峰值：夜间理应显示弱，跟手机习惯一致；
+     今日峰值放进 title，需要时悬停可看 */
+  const uvNow = d.hourly.uv_index ? d.hourly.uv_index[startIdx] : NaN;
+  const uv = uvLevel(uvNow);
+  const uvPeak = daily.uv_index_max && daily.uv_index_max[0];
+  const uvPeakLv = uvLevel(uvPeak);
+  const uvTitle = isFinite(uvPeak)
+    ? "当前 " + (isFinite(uvNow) ? uvNow.toFixed(1) : "—") +
+      " · 今日峰值 " + uvPeak.toFixed(1) + (uvPeakLv ? "（" + uvPeakLv.t + "）" : "")
+    : "";
+
+  $("mets").innerHTML =
+    '<div class="met" title="' + (aqi ? "中国 AQI " + aqi.aqi + "（PM2.5 " + airCur.pm2_5 + " μg/m³）" : "空气质量暂无数据") + '">' + MET_ICON.air +
+      '<span class="lb">空气</span><span class="vl ' + (aqi ? aqi.c : "") + '">' +
+      (aqi ? aqi.t : "—") + '</span></div>' +
+    '<div class="met" title="' + (isFinite(cur.wind_speed_10m) ? cur.wind_speed_10m.toFixed(1) + " km/h · " + Math.round(cur.wind_direction_10m) + "°" : "") + '">' + MET_ICON.wind +
+      '<span class="lb">' + (wd ? wd + "风" : "风") + '</span><span class="vl">' + (wl || "—") + '</span></div>' +
+    '<div class="met" title="' + uvTitle + '">' + MET_ICON.uv +
+      '<span class="lb">紫外线</span><span class="vl ' + (uv ? uv.c : "") + '">' +
+      (uv ? uv.t : "—") + '</span></div>';
 
   /* ---- 未来 3 天 ---- */
   const wMin = Math.min.apply(null, daily.temperature_2m_min);
@@ -772,6 +909,15 @@ function refineName(place) {
     }
   }).catch(() => {});
 }
+/* 空气是独立慢接口：先让主卡片出来，数据到了再补一次渲染，不拖首屏 */
+function refreshAir(place) {
+  const lat = place.lat, lon = place.lon;
+  return loadAir(lat, lon).then((r) => {
+    if (!r || !r.current) return;
+    state.air = { lat: lat, lon: lon, cur: r.current };
+    if (state.data) render();
+  }).catch(() => {});
+}
 async function boot(forceLocate) {
   if (state.loading) return;
   state.loading = true;
@@ -798,6 +944,7 @@ async function boot(forceLocate) {
     state.lastUpdate = Date.now();
     render();
     refineName(state.place);
+    refreshAir(state.place);
 
     $("boot").classList.add("hide");
 

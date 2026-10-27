@@ -14,5 +14,5 @@ desktop.ini
 .idea/
 
 # 本地临时校验文件
-_chk.*
+_chk/
 *.bak

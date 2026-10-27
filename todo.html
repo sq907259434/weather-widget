@@ -1,0 +1,490 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>待办卡片</title>
+<style>
+  :root{
+    --g1:#26304a; --g2:#3d4a68; --g3:#5a688a;
+    --ink:#fff;
+    --ink-2:rgba(255,255,255,.72);
+    --ink-3:rgba(255,255,255,.46);
+    --danger:#ff5a5f;
+  }
+
+  *{ box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+
+  html,body{
+    margin:0; padding:0; width:100%; height:100%;
+    background:transparent;
+    overflow:hidden;
+    font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","SF Pro Text","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+    color:var(--ink);
+    -webkit-font-smoothing:antialiased;
+    font-variant-numeric:tabular-nums;
+    cursor:default;
+    user-select:none;
+  }
+
+  /* ---------- 卡片 ---------- */
+  .card{
+    position:absolute; inset:0;
+    border-radius:10px;
+    padding:15px 15px 11px;
+    display:flex; flex-direction:column;
+    overflow:hidden;
+
+    background-image:linear-gradient(160deg,var(--g1) 0%,var(--g2) 52%,var(--g3) 100%);
+    box-shadow:
+      inset 0 1px 0 rgba(255,255,255,.30),
+      inset 0 0 0 1px rgba(255,255,255,.16);
+
+    -webkit-app-region: drag;   /* 空白处可拖窗口 */
+  }
+  body.acrylic .card{
+    background-image:none;
+    background-color:transparent;
+  }
+
+  .card .tint{
+    position:absolute; inset:0; z-index:1; pointer-events:none;
+    background:linear-gradient(160deg,
+      color-mix(in srgb, var(--g1) 58%, transparent) 0%,
+      color-mix(in srgb, var(--g2) 50%, transparent) 52%,
+      color-mix(in srgb, var(--g3) 46%, transparent) 100%);
+  }
+  .card::after{
+    content:""; position:absolute; left:-10%; right:-10%; top:-58%; height:76%; z-index:2;
+    background:radial-gradient(60% 100% at 50% 100%, rgba(255,255,255,.18), transparent 70%);
+    pointer-events:none;
+  }
+  .card > .hd, .card > .add, .card > .list, .card > .ft{
+    position:relative; z-index:3;
+  }
+
+  /* ---------- 顶栏 ---------- */
+  .hd{
+    height:22px; flex:0 0 auto;
+    display:flex; align-items:center; justify-content:space-between;
+  }
+  .ttl{
+    display:flex; align-items:baseline; gap:6px;
+    font-size:14px; font-weight:600; letter-spacing:.2px;
+  }
+  .ttl .cnt{
+    font-size:10.5px; font-weight:500; color:var(--ink-3); letter-spacing:.3px;
+  }
+  .acts{ display:flex; align-items:center; gap:2px; -webkit-app-region:no-drag; }
+  .act{
+    width:24px; height:24px; border:0; padding:0; border-radius:50%;
+    background:transparent; color:var(--ink-2); cursor:pointer;
+    display:grid; place-items:center;
+    opacity:.34; transition:opacity .2s ease, background .15s ease, transform .15s ease;
+  }
+  .card:hover .act{ opacity:.95; }
+  .act:hover{ background:rgba(255,255,255,.16); color:#fff; }
+  .act:active{ transform:scale(.88); }
+  .act svg{ width:13px; height:13px; }
+
+  /* ---------- 输入 ---------- */
+  .add{
+    flex:0 0 auto; height:32px;
+    display:flex; align-items:center; gap:6px;
+    margin:9px 0 2px;
+    -webkit-app-region:no-drag;
+  }
+  .add input{
+    flex:1 1 auto; min-width:0; height:32px;
+    border:0; outline:0; border-radius:10px;
+    padding:0 10px; font-size:12.5px; font-family:inherit;
+    color:#fff; background:rgba(255,255,255,.13);
+    box-shadow:inset 0 0 0 1px rgba(255,255,255,.14);
+    transition:background .16s ease, box-shadow .16s ease;
+  }
+  .add input::placeholder{ color:rgba(255,255,255,.40); }
+  .add input:focus{
+    background:rgba(255,255,255,.19);
+    box-shadow:inset 0 0 0 1px rgba(255,255,255,.32);
+  }
+  .btn-add{
+    flex:0 0 auto; width:32px; height:32px;
+    border:0; border-radius:10px; padding:0; cursor:pointer;
+    background:rgba(255,255,255,.16); color:#fff;
+    display:grid; place-items:center;
+    transition:background .15s ease, transform .12s ease, opacity .15s ease;
+  }
+  .btn-add:hover{ background:rgba(255,255,255,.26); }
+  .btn-add:active{ transform:scale(.92); }
+  .btn-add:disabled{ opacity:.32; cursor:default; transform:none; background:rgba(255,255,255,.10); }
+  .btn-add svg{ width:14px; height:14px; }
+
+  /* ---------- 列表 ---------- */
+  .list{
+    flex:1 1 auto; min-height:0;
+    margin:6px -4px 0;
+    padding:0 4px;
+    overflow-y:auto; overflow-x:hidden;
+    -webkit-app-region:drag;    /* 空白处仍可拖窗口，条目自己会 no-drag */
+  }
+  .list::-webkit-scrollbar{ width:0; }
+
+  /* 每行：红色删除底（默认隐藏）+ 可滑动的条目 */
+  .row{
+    position:relative;
+    border-radius:9px;
+    overflow:hidden;
+    margin-bottom:3px;
+    -webkit-app-region:no-drag;
+  }
+  /* 红色底只在拖动时显形，平时完全透明 —— 否则每条都像已经被删了 */
+  .row::before{
+    content:""; position:absolute; inset:0; z-index:0;
+    background:linear-gradient(90deg, rgba(255,80,86,.96), rgba(255,80,86,.55));
+    opacity:0; transition:opacity .12s ease;
+  }
+  .row.drag-bg::before{ opacity:1; }
+  .row .hint{
+    position:absolute; top:0; bottom:0; left:0; z-index:1;
+    display:flex; align-items:center; gap:5px;
+    padding-left:11px;
+    font-size:11.5px; font-weight:600; color:#fff;
+    letter-spacing:.4px; pointer-events:none;
+    opacity:0; transition:opacity .12s ease;
+  }
+  .row .hint svg{ width:13px; height:13px; }
+  .row.armed .hint{ opacity:1; }
+
+  .item{
+    position:relative; z-index:2;
+    height:30px;
+    display:flex; align-items:center; gap:8px;
+    padding:0 9px 0 7px;
+    border-radius:9px;
+    background:rgba(255,255,255,.085);
+    box-shadow:inset 0 0 0 1px rgba(255,255,255,.07);
+    will-change:transform;
+    transition:transform .18s cubic-bezier(.2,.8,.3,1), background .15s ease, opacity .18s ease;
+  }
+  .item:hover{ background:rgba(255,255,255,.115); }
+  .item.dragging{ transition:none; }
+  .item.removing{
+    transform:translateX(110%);
+    opacity:0;
+    transition:transform .2s ease-in, opacity .2s ease-in;
+  }
+
+  /* 完成勾选圈 */
+  .chk{
+    flex:0 0 auto; width:16px; height:16px; padding:0;
+    border:1.6px solid rgba(255,255,255,.45);
+    border-radius:50%; background:transparent; cursor:pointer;
+    display:grid; place-items:center;
+    transition:background .16s ease, border-color .16s ease, transform .12s ease;
+  }
+  .chk:hover{ border-color:rgba(255,255,255,.8); background:rgba(255,255,255,.10); }
+  .chk:active{ transform:scale(.88); }
+  .chk svg{
+    width:9px; height:9px; opacity:0;
+    transform:scale(.5); transition:opacity .14s ease, transform .14s ease;
+  }
+  .item.done .chk{ background:#3ecf6b; border-color:#3ecf6b; }
+  .item.done .chk svg{ opacity:1; transform:scale(1); }
+
+  /* 文字 */
+  .txt{
+    flex:1 1 auto; min-width:0;
+    font-size:12.5px; line-height:1.2;
+    letter-spacing:.2px;
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+    transition:color .16s ease, opacity .16s ease;
+  }
+  .item.done .txt{
+    color:rgba(255,255,255,.42);
+    text-decoration:line-through;
+    text-decoration-thickness:1.5px;
+    text-decoration-color:rgba(255,255,255,.52);
+  }
+
+  /* 右侧小把手，暗示可以往右滑 */
+  .grip{
+    flex:0 0 auto; width:10px; color:rgba(255,255,255,.22);
+    display:grid; place-items:center;
+    opacity:0; transition:opacity .15s ease;
+  }
+  .item:hover .grip{ opacity:1; }
+  .grip svg{ width:10px; height:10px; }
+
+  /* 空状态 */
+  .empty{
+    height:100%;
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    gap:6px; color:rgba(255,255,255,.36);
+    font-size:11.5px; letter-spacing:.3px;
+  }
+  .empty svg{ width:26px; height:26px; opacity:.55; }
+
+  /* ---------- 页脚 ---------- */
+  .ft{
+    flex:0 0 auto; height:14px;
+    display:flex; align-items:center; justify-content:space-between;
+    font-size:10px; color:rgba(255,255,255,.50); letter-spacing:.3px;
+  }
+  .ft .tip{ opacity:0; transition:opacity .2s ease; }
+  body:hover .ft .tip{ opacity:1; }
+</style>
+</head>
+<body>
+
+<div class="card" id="card">
+  <div class="tint"></div>
+
+  <div class="hd">
+    <div class="ttl">待办<span class="cnt" id="cnt"></span></div>
+    <div class="acts">
+      <button class="act" id="menuBtn" title="更多（置顶 / 清除已完成 / 退出）">
+        <svg viewBox="0 0 24 24" fill="currentColor" stroke="none">
+          <circle cx="12" cy="5.2" r="1.9"/><circle cx="12" cy="12" r="1.9"/><circle cx="12" cy="18.8" r="1.9"/>
+        </svg>
+      </button>
+      <button class="act" id="closeBtn" title="关闭">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round">
+          <path d="M6 6l12 12M18 6L6 18"/>
+        </svg>
+      </button>
+    </div>
+  </div>
+
+  <div class="add">
+    <input id="inp" type="text" placeholder="写点什么，回车添加" autocomplete="off" spellcheck="false" maxlength="80">
+    <button class="btn-add" id="addBtn" title="添加" disabled>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round">
+        <path d="M12 5.5v13M5.5 12h13"/>
+      </svg>
+    </button>
+  </div>
+
+  <div class="list" id="list"></div>
+
+  <div class="ft">
+    <span id="ftL">回车添加</span>
+    <span class="tip">按住往右滑删除</span>
+  </div>
+</div>
+
+<script>
+/* ================= 数据 ================= */
+const STORE = "todo_v1";
+const state = { items: [] };
+
+function load() {
+  try {
+    const raw = localStorage.getItem(STORE);
+    const arr = raw ? JSON.parse(raw) : [];
+    state.items = Array.isArray(arr) ? arr.filter((t) => t && typeof t.text === "string") : [];
+  } catch (e) {
+    state.items = [];
+  }
+}
+
+function save() {
+  try { localStorage.setItem(STORE, JSON.stringify(state.items)); } catch (e) {}
+}
+
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({
+  "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+}[c]));
+
+/* ================= 图标 ================= */
+const ICON_CHECK = '<svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 12.5l5 5 10-11"/></svg>';
+const ICON_TRASH = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9.5 7V4.8h5V7M6.5 7l.9 12.2a1.6 1.6 0 001.6 1.5h6a1.6 1.6 0 001.6-1.5L17.5 7"/></svg>';
+const ICON_GRIP = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M9 7l5 5-5 5"/></svg>';
+const ICON_EMPTY = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4.5" width="16" height="15" rx="3"/><path d="M8.5 10h7M8.5 14h4.5"/></svg>';
+
+/* ================= 渲染 ================= */
+function render() {
+  const list = $("list");
+  const items = state.items;
+
+  if (!items.length) {
+    list.innerHTML = '<div class="empty">' + ICON_EMPTY + '<div>还没有待办</div></div>';
+  } else {
+    let html = "";
+    items.forEach((t) => {
+      html += '<div class="row" data-id="' + t.id + '">' +
+        '<div class="hint">' + ICON_TRASH + '<span>松手删除</span></div>' +
+        '<div class="item' + (t.done ? " done" : "") + '" data-id="' + t.id + '">' +
+          '<button class="chk" data-act="toggle" title="' + (t.done ? "标记为未完成" : "标记为已完成") + '">' + ICON_CHECK + '</button>' +
+          '<span class="txt">' + esc(t.text) + '</span>' +
+          '<span class="grip">' + ICON_GRIP + '</span>' +
+        '</div></div>';
+    });
+    list.innerHTML = html;
+  }
+
+  const done = items.filter((t) => t.done).length;
+  $("cnt").textContent = items.length ? done + "/" + items.length : "";
+  $("ftL").textContent = items.length
+    ? "共 " + items.length + " 项 · 已完成 " + done
+    : "回车添加";
+  $("addBtn").disabled = !$("inp").value.trim();
+}
+
+/* ================= 增删改 ================= */
+function add(text) {
+  const t = String(text || "").trim();
+  if (!t) return false;
+  state.items.push({ id: Date.now() + "-" + Math.random().toString(36).slice(2, 7), text: t, done: false, at: Date.now() });
+  save();
+  render();
+  return true;
+}
+
+function toggle(id) {
+  const t = state.items.find((x) => x.id === id);
+  if (!t) return;
+  t.done = !t.done;    /* 只改状态，不挪位置 —— 用户要求原地不动 */
+  save();
+  render();
+}
+
+function remove(id) {
+  const i = state.items.findIndex((x) => x.id === id);
+  if (i < 0) return;
+  state.items.splice(i, 1);
+  save();
+  render();
+}
+
+function clearDone() {
+  const before = state.items.length;
+  state.items = state.items.filter((t) => !t.done);
+  if (state.items.length !== before) { save(); render(); }
+}
+
+/* ================= 交互：添加 ================= */
+const inp = $("inp");
+
+inp.addEventListener("input", () => {
+  $("addBtn").disabled = !inp.value.trim();
+});
+
+inp.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") {
+    e.preventDefault();
+    if (add(inp.value)) { inp.value = ""; $("addBtn").disabled = true; }
+  } else if (e.key === "Escape") {
+    inp.blur();
+  }
+});
+
+$("addBtn").addEventListener("click", () => {
+  if (add(inp.value)) { inp.value = ""; $("addBtn").disabled = true; }
+  inp.focus();
+});
+
+/* ================= 交互：点击完成 / 右滑删除 ================= */
+const list = $("list");
+let drag = null;            /* { item, row, id, startX, dx, moved } */
+let suppressClick = false;  /* 刚滑完，紧接着的 click 要吞掉，别误标完成 */
+
+const THRESHOLD = 82;   /* 滑过这个距离就删（约 1/3 卡宽） */
+
+list.addEventListener("mousedown", (e) => {
+  if (e.button !== 0) return;
+  const item = e.target.closest(".item");
+  if (!item) return;
+
+  /* 点在勾选圈上：走 click，不启动滑动手势 */
+  if (e.target.closest(".chk")) return;
+
+  drag = {
+    item: item,
+    row: item.parentElement,
+    id: item.dataset.id,
+    startX: e.clientX,
+    dx: 0,
+    moved: false,
+  };
+  e.preventDefault();     /* 防止拖出文字选区 */
+});
+
+window.addEventListener("mousemove", (e) => {
+  if (!drag) return;
+  const dx = e.clientX - drag.startX;
+
+  /* 只允许往右滑；往左给一点阻尼回弹感（不跟手） */
+  const applied = dx > 0 ? dx : dx * 0.18;
+  drag.dx = applied;
+
+  if (Math.abs(dx) > 3) {
+    if (!drag.moved) {
+      drag.moved = true;
+      drag.item.classList.add("dragging");
+      drag.row.classList.add("drag-bg");   /* 一开始滑就露出红色删除底 */
+    }
+    drag.item.style.transform = "translateX(" + applied.toFixed(1) + "px)";
+    drag.row.classList.toggle("armed", applied >= THRESHOLD);
+  }
+});
+
+window.addEventListener("mouseup", () => {
+  if (!drag) return;
+  const d = drag;
+  drag = null;
+
+  d.item.classList.remove("dragging");
+
+  if (!d.moved) {                     /* 只是点了一下，交给 click 处理 */
+    d.item.style.transform = "";
+    return;
+  }
+
+  /* 滑动结束后的那次 click 一律吞掉（否则滑到勾选圈上会顺手标记完成） */
+  suppressClick = true;
+  setTimeout(() => { suppressClick = false; }, 0);
+
+  if (d.dx >= THRESHOLD) {
+    /* 松手删除：先滑出去，再从数据里移除 */
+    d.item.classList.add("removing");
+    d.item.style.transform = "";
+    setTimeout(() => remove(d.id), 190);
+  } else {
+    d.item.style.transform = "";      /* 没到阈值，弹回去 */
+    d.row.classList.remove("armed", "drag-bg");
+  }
+});
+
+list.addEventListener("click", (e) => {
+  if (suppressClick) { e.stopPropagation(); e.preventDefault(); return; }
+  const chk = e.target.closest(".chk");
+  if (chk) {
+    const item = chk.closest(".item");
+    if (item) toggle(item.dataset.id);
+  }
+}, true);
+
+/* ================= 菜单 / 关闭 ================= */
+$("menuBtn").addEventListener("click", () => { if (window.wgt) window.wgt.menu(); });
+$("closeBtn").addEventListener("click", () => { if (window.wgt) window.wgt.close(); else window.close(); });
+
+document.addEventListener("contextmenu", (e) => {
+  /* 输入框里保留系统右键菜单，方便粘贴 */
+  if (e.target.closest("input")) return;
+  e.preventDefault();
+  if (window.wgt) window.wgt.menu();
+});
+
+if (window.wgt) {
+  window.wgt.onFocusInput(() => { inp.focus(); inp.select(); });
+  window.wgt.onClearDone(() => clearDone());
+}
+
+/* ================= 启动 ================= */
+document.body.classList.add(window.wgt && window.wgt.acrylic ? "acrylic" : "solid");
+load();
+render();
+</script>
+</body>
+</html>
