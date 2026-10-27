@@ -1,0 +1,72 @@
+{
+  "name": "weather-widget",
+  "version": "1.0.0",
+  "description": "A frosted-glass weather widget for the Windows desktop (Electron)",
+  "author": {
+    "name": "WeatherWidget Contributors"
+  },
+  "license": "MIT",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "icon": "python tools/make-icon.py icon.png icon.ico",
+    "dist": "electron-builder --win",
+    "dist:dir": "electron-builder --win --dir"
+  },
+  "devDependencies": {
+    "electron": "^33.4.11",
+    "electron-builder": "25.1.8"
+  },
+  "build": {
+    "appId": "com.weatherwidget.desktop",
+    "productName": "WeatherWidget",
+    "copyright": "Copyright © 2026 WeatherWidget Contributors",
+    "asar": true,
+    "compression": "maximum",
+    "npmRebuild": false,
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "widget.html",
+      "icon.png",
+      "package.json"
+    ],
+    "win": {
+      "icon": "icon.ico",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        },
+        {
+          "target": "portable",
+          "arch": ["x64"]
+        }
+      ],
+      "artifactName": "${productName}-${version}-${arch}-setup.${ext}"
+    },
+    "portable": {
+      "artifactName": "${productName}-${version}-${arch}-portable.${ext}",
+      "requestExecutionLevel": "user"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "天气卡片",
+      "runAfterFinish": true,
+      "deleteAppDataOnUninstall": false,
+      "multiLanguageInstaller": true,
+      "language": "2052",
+      "include": "build/installer.nsh",
+      "installerIcon": "icon.ico",
+      "uninstallerIcon": "icon.ico",
+      "installerHeaderIcon": "icon.ico"
+    }
+  }
+}

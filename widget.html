@@ -1,0 +1,918 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>天气卡片</title>
+<style>
+  :root{
+    --g1:#1668cf; --g2:#4a9ef0; --g3:#9ed3fb;
+    --ink:#fff;
+    --ink-2:rgba(255,255,255,.72);
+    --ink-3:rgba(255,255,255,.48);
+  }
+
+  body[data-sky="clear-day"]   { --g1:#1668cf; --g2:#4a9ef0; --g3:#9ed3fb; }
+  body[data-sky="clear-night"] { --g1:#070c18; --g2:#12203c; --g3:#2b3f68; }
+  body[data-sky="partly-day"]  { --g1:#2a74c9; --g2:#6ba8e4; --g3:#b4d4f2; }
+  body[data-sky="partly-night"]{ --g1:#0a1020; --g2:#1a2742; --g3:#31456a; }
+  body[data-sky="cloudy"]      { --g1:#46586e; --g2:#71869c; --g3:#a4b4c4; }
+  body[data-sky="rain"]        { --g1:#131f33; --g2:#2a425c; --g3:#4c6b88; }
+  body[data-sky="drizzle"]     { --g1:#1c2c42; --g2:#36506c; --g3:#5f8099; }
+  body[data-sky="snow"]        { --g1:#54687b; --g2:#8ba0b3; --g3:#cfdbe5; --scrim:.34; }
+  body[data-sky="thunder"]     { --g1:#0f0e1a; --g2:#28223c; --g3:#423a5a; }
+  body[data-sky="fog"]         { --g1:#586372; --g2:#8693a0; --g3:#b8c1ca; --scrim:.30; }
+
+  *{ box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+
+  html,body{
+    margin:0; padding:0; width:100%; height:100%;
+    background:transparent;      /* 窗口透明，露出桌面 */
+    overflow:hidden;
+    font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","SF Pro Text","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+    color:var(--ink);
+    -webkit-font-smoothing:antialiased;
+    font-variant-numeric:tabular-nums;
+    cursor:default;
+    user-select:none;
+  }
+
+  /* ---------- 卡片 ---------- */
+  .card{
+    position:absolute; inset:0;
+    border-radius:10px;
+    padding:15px 17px 13px;
+    display:flex; flex-direction:column;
+    overflow:hidden;
+
+    /* 兜底色：没有系统磨砂时的天光渐变 */
+    background-color:transparent;
+    background-image:linear-gradient(160deg,var(--g1) 0%,var(--g2) 52%,var(--g3) 100%);
+
+    box-shadow:
+      inset 0 1px 0 rgba(255,255,255,.30),
+      inset 0 0 0 1px rgba(255,255,255,.16);
+
+    -webkit-app-region: drag;    /* 整个卡片可拖动窗口 */
+  }
+
+  /* 系统磨砂模式下：卡片自身必须全透明，否则会把系统模糊盖死 */
+  body.acrylic .card{
+    background-image:none;
+    background-color:transparent;
+  }
+
+  /* 天光层：给磨砂玻璃染上当前天气的色调，同时保证白字对比度 */
+  .card .tint{
+    position:absolute; inset:0; z-index:1; pointer-events:none;
+    background:linear-gradient(160deg,
+      color-mix(in srgb, var(--g1) 55%, transparent) 0%,
+      color-mix(in srgb, var(--g2) 48%, transparent) 52%,
+      color-mix(in srgb, var(--g3) 46%, transparent) 100%);
+    transition:background .8s ease;
+  }
+
+  /* 浅色天光时压暗下半部，保证白字可读 */
+  .card::before{
+    content:""; position:absolute; inset:0; z-index:2; border-radius:inherit;
+    background:linear-gradient(180deg,
+      rgba(4,14,28,0) 34%,
+      rgba(4,14,28,calc(var(--scrim, 0) * .55)) 72%,
+      rgba(4,14,28,var(--scrim, 0)) 100%);
+    pointer-events:none;
+  }
+
+  /* 顶部一抹高光，做出玻璃的弧度 */
+  .card::after{
+    content:""; position:absolute; left:-10%; right:-10%; top:-58%; height:76%; z-index:2;
+    background:radial-gradient(60% 100% at 50% 100%, rgba(255,255,255,.20), transparent 70%);
+    pointer-events:none;
+  }
+
+  .card > .hd, .card > .main, .card > .hrs, .card > .dys, .card > .ft{
+    position:relative; z-index:3;
+  }
+
+  /* ---------- 顶栏 ---------- */
+  .hd{
+    height:22px; flex:0 0 auto;
+    display:flex; align-items:center; justify-content:space-between;
+  }
+  .city{
+    -webkit-app-region:no-drag;
+    display:flex; align-items:center; gap:5px;
+    font-size:14px; font-weight:600; letter-spacing:.2px;
+    cursor:pointer; max-width:180px;
+  }
+  .city span.nm{
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  }
+  .city svg{ width:10px; height:10px; opacity:.75; flex:0 0 auto; }
+
+  .acts{ display:flex; align-items:center; gap:2px; -webkit-app-region:no-drag; }
+  .act{
+    width:24px; height:24px; border:0; padding:0; border-radius:50%;
+    background:transparent; color:var(--ink-2); cursor:pointer;
+    display:grid; place-items:center;
+    opacity:.34; transition:opacity .2s ease, background .15s ease, transform .15s ease;
+  }
+  .card:hover .act{ opacity:.95; }
+  .act:hover{ background:rgba(255,255,255,.16); color:#fff; }
+  .act:active{ transform:scale(.88); }
+  .act svg{ width:13px; height:13px; }
+  .act.spin svg{ animation:spin .9s linear infinite; }
+  @keyframes spin{ to{ transform:rotate(360deg) } }
+
+  /* ---------- 主区 ---------- */
+  .main{
+    flex:1 1 auto; min-height:0;
+    display:flex; align-items:center; justify-content:space-between;
+    gap:8px;
+    padding:2px 0 0;
+  }
+  .left{ min-width:0; }
+  .temp{
+    display:flex; align-items:flex-start;
+    font-size:72px; font-weight:200; line-height:.88;
+    letter-spacing:-3.5px; margin:0;
+  }
+  .temp i{ font-size:30px; font-style:normal; font-weight:200; margin-top:5px; letter-spacing:0; opacity:.9; }
+  .desc{ font-size:13.5px; font-weight:500; margin-top:5px; letter-spacing:.3px; }
+  .range{ font-size:11.5px; color:var(--ink-2); margin-top:3px; }
+
+  .ico{
+    flex:0 0 auto; width:92px; height:92px;
+    display:grid; place-items:center;
+  }
+  .ico svg{
+    width:92px; height:92px;
+    filter:drop-shadow(0 6px 16px rgba(0,10,30,.26));
+  }
+
+  /* ---------- 小时条 ---------- */
+  .hrs{
+    flex:0 0 auto; height:62px;
+    display:flex; align-items:center;
+    padding:7px 0 6px;
+    margin:0 -3px;
+    border-top:1px solid rgba(255,255,255,.16);
+  }
+  .hr{
+    flex:1 1 0; min-width:0;
+    display:flex; flex-direction:column; align-items:center; gap:3px;
+  }
+  .hr .t{ font-size:10.5px; color:var(--ink-2); letter-spacing:.2px; }
+  .hr.now .t{ color:#fff; font-weight:600; }
+  .hr .i svg{ width:19px; height:19px; display:block; }
+  .hr .v{ font-size:12px; font-weight:500; }
+
+  /* ---------- 三天 ---------- */
+  .dys{
+    flex:0 0 auto;
+    border-top:1px solid rgba(255,255,255,.16);
+    padding-top:4px;
+  }
+  .drow{
+    display:grid; grid-template-columns:32px 18px 1fr 22px 22px;
+    align-items:center; gap:7px; height:22px;
+  }
+  .drow .dn{ font-size:11.5px; font-weight:500; color:rgba(255,255,255,.9); }
+  .drow .di svg{ width:17px; height:17px; display:block; filter:drop-shadow(0 1px 2px rgba(0,25,60,.45)); }
+  .drow .dlo{ font-size:11.5px; color:var(--ink-3); text-align:right; }
+  .drow .dhi{ font-size:11.5px; font-weight:500; text-align:right; }
+  .bar{ position:relative; height:3px; border-radius:2px; background:rgba(255,255,255,.11); }
+  .bar > span{ position:absolute; top:0; bottom:0; border-radius:2px; overflow:hidden; }
+  .bar > span > i{
+    position:absolute; top:0; height:100%;
+    background-image:linear-gradient(90deg,#63d0ff 0%,#a8e05f 34%,#ffd60a 62%,#ff9f0a 100%);
+  }
+
+  /* ---------- 页脚 ---------- */
+  .ft{
+    flex:0 0 auto; height:13px;
+    display:flex; align-items:center; justify-content:space-between;
+    font-size:10px; color:rgba(255,255,255,.58); letter-spacing:.3px;
+    text-shadow:0 1px 2px rgba(0,25,55,.18);
+  }
+  .ft .top{ opacity:0; transition:opacity .2s ease; color:rgba(255,255,255,.58); }
+  body:hover .ft .top{ opacity:1; }
+
+  /* ---------- 搜索层 ---------- */
+  .search{
+    position:absolute; inset:0; z-index:20;
+    border-radius:10px; padding:14px;
+    display:flex; flex-direction:column;
+    background:rgba(16,24,38,.86);
+    -webkit-backdrop-filter:blur(28px) saturate(160%);
+    backdrop-filter:blur(28px) saturate(160%);
+    border:1px solid rgba(255,255,255,.16);
+    opacity:0; pointer-events:none;
+    transform:scale(.97);
+    transition:opacity .22s ease, transform .22s cubic-bezier(.2,.8,.3,1);
+  }
+  .search.open{ opacity:1; pointer-events:auto; transform:none; }
+  .search input{
+    -webkit-app-region:no-drag;
+    width:100%; height:34px; flex:0 0 auto;
+    border:0; outline:0; border-radius:11px;
+    padding:0 11px; font-size:13px; font-family:inherit;
+    color:#fff; background:rgba(255,255,255,.12);
+    box-shadow:inset 0 0 0 1px rgba(255,255,255,.14);
+  }
+  .search input::placeholder{ color:rgba(255,255,255,.38); }
+  .res{ margin-top:6px; overflow-y:auto; flex:1 1 auto; }
+  .res .r{
+    -webkit-app-region:no-drag;
+    display:flex; align-items:center; justify-content:space-between; gap:8px;
+    padding:8px 9px; border-radius:10px; cursor:pointer;
+  }
+  .res .r:hover{ background:rgba(255,255,255,.1); }
+  .res .r .n{ font-size:12.5px; }
+  .res .r .m{ font-size:10px; color:rgba(255,255,255,.4); margin-top:1px; }
+  .res .tip{ font-size:11px; color:rgba(255,255,255,.36); padding:9px 4px; }
+  .res::-webkit-scrollbar{ width:0; }
+
+  /* 首次加载态 */
+  .boot{
+    position:absolute; inset:0; z-index:30;
+    display:grid; place-items:center;
+    border-radius:10px;
+    background:linear-gradient(160deg,#1b6fd4,#4a9ef0);
+    font-size:12px; color:rgba(255,255,255,.8);
+    transition:opacity .35s ease;
+  }
+  .boot.hide{ opacity:0; pointer-events:none; }
+</style>
+</head>
+<body data-sky="clear-day">
+
+<div class="card" id="card">
+  <div class="tint"></div>
+  <div class="hd">
+    <div class="city" id="cityBtn" title="点击搜索城市">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round">
+        <path d="M12 21s7-6.1 7-11a7 7 0 1 0-14 0c0 4.9 7 11 7 11z"/><circle cx="12" cy="10" r="2.6"/>
+      </svg>
+      <span class="nm" id="cityName">定位中…</span>
+    </div>
+    <div class="acts">
+      <button class="act" id="menuBtn" title="更多（置顶 / 搜索 / 退出）">
+        <svg viewBox="0 0 24 24" fill="currentColor" stroke="none">
+          <circle cx="12" cy="5.2" r="1.9"/><circle cx="12" cy="12" r="1.9"/><circle cx="12" cy="18.8" r="1.9"/>
+        </svg>
+      </button>
+      <button class="act" id="refreshBtn" title="刷新">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M20.5 12a8.5 8.5 0 1 1-2.6-6.1"/><path d="M20.5 4.2V9h-4.8"/>
+        </svg>
+      </button>
+      <button class="act" id="closeBtn" title="关闭">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round">
+          <path d="M6 6l12 12M18 6L6 18"/>
+        </svg>
+      </button>
+    </div>
+  </div>
+
+  <div class="main">
+    <div class="left">
+      <div class="temp"><span id="tNum">--</span><i>°</i></div>
+      <div class="desc" id="desc">正在获取…</div>
+      <div class="range" id="range">&nbsp;</div>
+    </div>
+    <div class="ico" id="ico"></div>
+  </div>
+
+  <div class="hrs" id="hrs"></div>
+  <div class="dys" id="dys"></div>
+
+  <div class="ft">
+    <span id="ftL">—</span>
+    <span class="top" id="ftR"></span>
+  </div>
+</div>
+
+<div class="search" id="search">
+  <input id="q" type="text" placeholder="搜索城市，如 上海 / Tokyo" autocomplete="off">
+  <div class="res" id="res"><div class="tip">输入城市名后回车</div></div>
+</div>
+
+<div class="boot" id="boot">正在定位…</div>
+
+<script>
+/* ================= WMO 天气代码 ================= */
+const WMO = {
+  0:{t:"晴",k:"clear"}, 1:{t:"晴间多云",k:"partly"}, 2:{t:"局部多云",k:"partly"},
+  3:{t:"阴",k:"cloudy"}, 45:{t:"有雾",k:"fog"}, 48:{t:"雾凇",k:"fog"},
+  51:{t:"小毛毛雨",k:"drizzle"}, 53:{t:"毛毛雨",k:"drizzle"}, 55:{t:"大毛毛雨",k:"rain"},
+  56:{t:"冻毛毛雨",k:"rain"}, 57:{t:"强冻毛毛雨",k:"rain"},
+  61:{t:"小雨",k:"rain"}, 63:{t:"中雨",k:"rain"}, 65:{t:"大雨",k:"rain"},
+  66:{t:"冻雨",k:"rain"}, 67:{t:"强冻雨",k:"rain"},
+  71:{t:"小雪",k:"snow"}, 73:{t:"中雪",k:"snow"}, 75:{t:"大雪",k:"snow"}, 77:{t:"雪粒",k:"snow"},
+  80:{t:"小阵雨",k:"rain"}, 81:{t:"阵雨",k:"rain"}, 82:{t:"强阵雨",k:"rain"},
+  85:{t:"小阵雪",k:"snow"}, 86:{t:"强阵雪",k:"snow"},
+  95:{t:"雷阵雨",k:"thunder"}, 96:{t:"雷阵雨伴冰雹",k:"thunder"}, 99:{t:"强雷阵雨伴冰雹",k:"thunder"},
+};
+const wmo = (c) => WMO[c] || { t: "未知", k: "cloudy" };
+
+/* ================= 图标 ================= */
+let uid = 0;
+const nid = (p) => p + (++uid);
+
+function sunPart(cx, cy, r, gid) {
+  let rays = "";
+  for (let i = 0; i < 8; i++) {
+    rays += '<line x1="0" y1="' + (-(r + 3.2)) + '" x2="0" y2="' + (-(r + 7.4)) +
+      '" transform="rotate(' + (i * 45) + ')" stroke="#FFC94D" stroke-width="' +
+      Math.max(2.6, r * 0.3).toFixed(1) + '" stroke-linecap="round" opacity=".95"/>';
+  }
+  return '<g transform="translate(' + cx + ',' + cy + ')"><circle r="' + r +
+    '" fill="url(#' + gid + ')"/>' + rays + '</g>';
+}
+function moonPath(r) {
+  const r2 = r * 1.28;
+  return 'M0,' + (-r) + ' A' + r + ',' + r + ' 0 1,0 0,' + r +
+         ' A' + r2.toFixed(1) + ',' + r2.toFixed(1) + ' 0 0,1 0,' + (-r) + ' Z';
+}
+function moonPart(cx, cy, r, gid, rot) {
+  return '<g transform="translate(' + cx + ',' + cy + ') rotate(' + (rot === undefined ? -18 : rot) + ')">' +
+    '<path d="' + moonPath(r) + '" fill="url(#' + gid + ')"/></g>';
+}
+function cloudPart(cx, cy, s, gid) {
+  return '<g transform="translate(' + cx + ',' + cy + ') scale(' + s + ')">' +
+    '<circle cx="-9" cy="8" r="10.5" fill="url(#' + gid + ')"/>' +
+    '<circle cx="6" cy="2" r="13.6" fill="url(#' + gid + ')"/>' +
+    '<rect x="-9" y="8" width="24.6" height="10.5" rx="5.25" fill="url(#' + gid + ')"/></g>';
+}
+function defsSun(g) {
+  return '<radialGradient id="' + g + '" cx="36%" cy="30%" r="76%">' +
+    '<stop offset="0" stop-color="#FFE98A"/><stop offset="55%" stop-color="#FFCE47"/>' +
+    '<stop offset="1" stop-color="#FF9E1B"/></radialGradient>';
+}
+function defsMoon(g) {
+  return '<linearGradient id="' + g + '" x1="0" y1="0" x2="1" y2="1">' +
+    '<stop offset="0" stop-color="#FBFDFF"/><stop offset="1" stop-color="#B7CDE9"/></linearGradient>';
+}
+function defsCloud(g, top, bottom) {
+  return '<linearGradient id="' + g + '" gradientUnits="userSpaceOnUse" x1="0" y1="-12" x2="0" y2="19">' +
+    '<stop offset="0" stop-color="' + (top || "#FFFFFF") + '"/>' +
+    '<stop offset="1" stop-color="' + (bottom || "#C2D3E4") + '"/></linearGradient>';
+}
+
+function svgIcon(kind, isDay) {
+  const sun = nid("s"), moon = nid("m"), cl = nid("c"), cl2 = nid("c");
+  let defs = "", inner = "";
+  const CT = "#FFFFFF", CB = "#C0D1E2", CT2 = "#DCE8F3", CB2 = "#9FB3C7";
+
+  switch (kind) {
+    case "clear":
+      if (isDay) { defs = defsSun(sun); inner = sunPart(32, 32, 13, sun); }
+      else {
+        defs = defsMoon(moon);
+        inner = moonPart(31, 33, 17.5, moon, -16) +
+          '<circle cx="47" cy="17" r="1.6" fill="#fff" opacity=".9"/>' +
+          '<circle cx="14" cy="20" r="1.1" fill="#fff" opacity=".65"/>' +
+          '<circle cx="52" cy="46" r="1.2" fill="#fff" opacity=".55"/>';
+      }
+      break;
+    case "partly":
+      defs = defsSun(sun) + defsMoon(moon) + defsCloud(cl, CT, CB);
+      inner = (isDay ? sunPart(23, 21, 9.6, sun) : moonPart(25, 22, 11, moon, -16)) +
+        cloudPart(37, 36, 0.86, cl);
+      break;
+    case "cloudy":
+      defs = defsCloud(cl, CT, CB) + defsCloud(cl2, CT2, CB2);
+      inner = cloudPart(27, 25, 0.72, cl2) + cloudPart(36, 40, 0.95, cl);
+      break;
+    case "fog":
+      defs = defsCloud(cl, CT, CB);
+      inner = cloudPart(32, 26, 0.86, cl) +
+        '<g stroke="#DDE9F4" stroke-width="4" stroke-linecap="round" opacity=".92">' +
+        '<line x1="15" y1="45" x2="49" y2="45"/><line x1="20" y1="52" x2="44" y2="52"/>' +
+        '<line x1="15" y1="59" x2="43" y2="59"/></g>';
+      break;
+    case "drizzle":
+      defs = defsCloud(cl, CT, CB);
+      inner = cloudPart(32, 24, 0.9, cl) +
+        '<g stroke="#79D2F7" stroke-width="3.6" stroke-linecap="round">' +
+        '<line x1="22" y1="45" x2="20.4" y2="50"/><line x1="32" y1="45" x2="30.4" y2="50"/>' +
+        '<line x1="42" y1="45" x2="40.4" y2="50"/></g>';
+      break;
+    case "rain":
+      defs = defsCloud(cl, CT, CB);
+      inner = cloudPart(32, 23, 0.92, cl) +
+        '<g stroke="#6BCBF6" stroke-width="3.9" stroke-linecap="round">' +
+        '<line x1="21" y1="44" x2="17.6" y2="54"/><line x1="32" y1="44" x2="28.6" y2="54"/>' +
+        '<line x1="43" y1="44" x2="39.6" y2="54"/></g>';
+      break;
+    case "snow":
+      defs = defsCloud(cl, CT, CB);
+      inner = cloudPart(32, 23, 0.92, cl) +
+        '<g fill="#EAF6FF"><circle cx="21" cy="48" r="2.9"/><circle cx="32" cy="54" r="2.9"/>' +
+        '<circle cx="43" cy="48" r="2.9"/><circle cx="26.5" cy="58" r="2.2"/>' +
+        '<circle cx="38" cy="58" r="2.2"/></g>';
+      break;
+    case "thunder":
+      defs = defsCloud(cl, "#D7E3EF", "#8FA6BC");
+      inner = cloudPart(32, 22, 0.92, cl) +
+        '<path d="M34.5 38 L24 53 h7.2 l-4 10 L40 48 h-7.4 Z" fill="#FFD60A"/>';
+      break;
+    default:
+      defs = defsCloud(cl, CT, CB);
+      inner = cloudPart(32, 32, 1, cl);
+  }
+
+  return '<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">' +
+    '<defs>' + defs + '</defs>' + inner + '</svg>';
+}
+
+/* ================= 工具 ================= */
+const pad2 = (n) => String(n).padStart(2, "0");
+const $ = (id) => document.getElementById(id);
+const escapeHTML = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) =>
+  ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+function fetchJSON(url, ms) {
+  const ac = new AbortController();
+  const to = setTimeout(() => ac.abort(), ms || 9000);
+  return fetch(url, { signal: ac.signal, cache: "no-store" })
+    .then((r) => { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
+    .finally(() => clearTimeout(to));
+}
+
+const WEEK = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
+function dayLabel(dateStr, idx) {
+  if (idx === 0) return "今天";
+  if (idx === 1) return "明天";
+  const d = new Date(dateStr + "T00:00:00");
+  return isNaN(d.getTime()) ? dateStr.slice(5) : WEEK[d.getDay()];
+}
+function hhmm(ts) {
+  const d = new Date(ts);
+  return pad2(d.getHours()) + ":" + pad2(d.getMinutes());
+}
+
+function applySky(kind, isDay) {
+  let key;
+  if (kind === "clear") key = isDay ? "clear-day" : "clear-night";
+  else if (kind === "partly") key = isDay ? "partly-day" : "partly-night";
+  else if (kind === "cloudy") key = "cloudy";
+  else if (kind === "fog") key = "fog";
+  else if (kind === "drizzle") key = "drizzle";
+  else if (kind === "rain") key = "rain";
+  else if (kind === "snow") key = "snow";
+  else if (kind === "thunder") key = "thunder";
+  else key = isDay ? "partly-day" : "partly-night";
+  if (document.body.dataset.sky !== key) document.body.dataset.sky = key;
+}
+
+/* ================= 定位 ================= */
+const DEFAULT_CITY = { name: "北京", lat: 39.9042, lon: 116.4074 };
+const STORE_KEY = "wgt_place_v2";      /* 用户手动选定的城市 */
+const AUTO_KEY  = "wgt_auto_v3";       /* 上次自动定位的结果 */
+const AUTO_FRESH_MS = 30 * 60 * 1000;  /* 30 分钟内不重复定位，超过就重新探一次（笔记本换地方能跟上） */
+
+/* 本机时区，用来识别"出口 IP 在境外"（开了代理/VPN 时 IP 定位会跑到国外） */
+const LOCAL_TZ = (() => {
+  try { return Intl.DateTimeFormat().resolvedOptions().timeZone || ""; } catch (e) { return ""; }
+})();
+
+function geoBrowser(timeout) {
+  return new Promise((resolve, reject) => {
+    if (!navigator.geolocation) return reject(new Error("no-geo"));
+    navigator.geolocation.getCurrentPosition(
+      (p) => resolve({ lat: p.coords.latitude, lon: p.coords.longitude }),
+      (e) => reject(e),
+      { enableHighAccuracy: false, timeout: timeout || 2500, maximumAge: 10 * 60 * 1000 }
+    );
+  });
+}
+
+const IP_SOURCES = [
+  {
+    id: "ip.sb",
+    url: "https://api.ip.sb/geoip",
+    ms: 3500,
+    pick: (d) => (d && d.latitude != null) ? {
+      lat: d.latitude, lon: d.longitude, city: d.city,
+      tz: d.timezone || "", cc: d.country_code || "",
+    } : null,
+  },
+  {
+    id: "ipwho",
+    url: "https://ipwho.is/?lang=zh-CN",
+    ms: 3500,
+    pick: (d) => (d && d.success !== false && d.latitude != null) ? {
+      lat: d.latitude, lon: d.longitude, city: d.city || d.region,
+      tz: (d.timezone && d.timezone.id) || "", cc: d.country_code || "",
+    } : null,
+  },
+];
+
+function sameArea(a, b) {
+  /* 粗判是否同一地区：纬度经度都在 1 度（约 110km）内 */
+  return Math.abs(a.lat - b.lat) < 1 && Math.abs(a.lon - b.lon) < 1;
+}
+
+async function queryIPRaw() {
+  /* 首选主进程查询：Node 网络栈直连，不跟随 Windows 系统代理。
+     渲染进程的 fetch 会跟随系统代理，机器上挂代理/VPN 时 IP 会落到境外出口。 */
+  if (window.wgt && window.wgt.geoIP) {
+    try {
+      const list = await window.wgt.geoIP();
+      if (list && list.length) return list;
+    } catch (e) { /* 主进程不可用时退到下方直连 */ }
+  }
+
+  const all = await Promise.all(IP_SOURCES.map((src) =>
+    fetchJSON(src.url, src.ms)
+      .then((d) => {
+        const v = src.pick(d);
+        return v ? Object.assign({ src: src.id }, v) : null;
+      })
+      .catch(() => null)
+  ));
+  return all.filter(Boolean);
+}
+
+async function geoIP() {
+  const ok = await queryIPRaw();
+  if (!ok.length) throw new Error("ip-all-failed");
+
+  /* 主源（ip.sb）实测比 ipwho 准，两者给出不同城市时以主源为准；
+     主源没响应时，结果不可交叉验证，标为低可信，让界面如实提示 */
+  const PRIMARY = "ip.sb";
+  const fromPrimary = (r) => r && r.src === PRIMARY;
+
+  /* ip.sb 给的是英文城市名（Kunming），ipwho 带 lang=zh-CN 给中文（昆明）。
+     选了哪个源都能借同地区的 ipwho 名字，避免卡片上出现英文地名 */
+  const withZhName = (chosen) => {
+    if (!chosen || chosen.src === "ipwho") return chosen;
+    const zh = ok.find((r) => r.src === "ipwho" && r.city && sameArea(r, chosen));
+    return zh ? Object.assign({}, chosen, { city: zh.city }) : chosen;
+  };
+
+  /* 1) 时区与本机一致的优先 —— 这条能挡掉「出口 IP 在伦敦」这类误判 */
+  if (LOCAL_TZ) {
+    const tzHit = ok.filter((r) => r.tz && r.tz === LOCAL_TZ);
+    if (tzHit.length) {
+      const top = tzHit.find((a) => tzHit.filter((b) => sameArea(a, b)).length >= 2)
+        || tzHit.find(fromPrimary)
+        || tzHit[0];
+      if (!fromPrimary(top)) top.lowConfidence = true;
+      return withZhName(top);
+    }
+  }
+
+  /* 2) 没有时区命中时，看哪个坐标被更多来源支持 */
+  let best = ok[0], bestScore = 0;
+  ok.forEach((a) => {
+    const score = ok.filter((b) => sameArea(a, b)).length;
+    if (score > bestScore) { best = a; bestScore = score; }
+  });
+  if (bestScore >= 2) return withZhName(best);
+
+  /* 两个来源互相矛盾时，用主源的 */
+  if (ok.some(fromPrimary)) return withZhName(ok.find(fromPrimary));
+
+  /* 3) 都不一致：时区不符说明可能挂着代理，仍用第一个可用结果，但标记低可信 */
+  return withZhName(Object.assign({ lowConfidence: true }, ok[0]));
+}
+
+async function reverseName(lat, lon, fallback, ms) {
+  try {
+    const d = await fetchJSON(
+      "https://api-bdc.io/data/reverse-geocode-client?latitude=" + lat +
+      "&longitude=" + lon + "&localityLanguage=zh-Hans", ms || 2500);
+    const city = d.city || d.locality || d.principalSubdivision;
+    if (city) return String(city).replace(/市$/, "");
+  } catch (e) { /* 降级 */ }
+  return fallback || "当前位置";
+}
+
+function readJSON(key) {
+  try { return JSON.parse(localStorage.getItem(key) || "null"); } catch (e) { return null; }
+}
+function writeJSON(key, v) {
+  try { localStorage.setItem(key, JSON.stringify(v)); } catch (e) {}
+}
+
+const readManual = () => readJSON(STORE_KEY);
+const writeManual = (v) => writeJSON(STORE_KEY, v);
+const readAuto = () => readJSON(AUTO_KEY);
+const writeAuto = (v) => writeJSON(AUTO_KEY, v);
+
+async function resolvePlace(forceDetect) {
+  /* 手动选定的城市优先级最高，除非用户主动要求重新定位 */
+  const manual = readManual();
+  if (manual && !forceDetect) return Object.assign({ manual: true }, manual);
+
+  /* 系统定位和 IP 定位同时发起，不串行等待 */
+  const geoP = geoBrowser(2500)
+    .then(async (p) => ({
+      lat: p.lat, lon: p.lon, precise: true,
+      name: await reverseName(p.lat, p.lon, ""),
+    }))
+    .catch(() => null);
+
+  const ipP = geoIP()
+    .then(async (ip) => ({
+      lat: ip.lat, lon: ip.lon, precise: false,
+      lowConfidence: !!ip.lowConfidence, src: ip.src,
+      /* IP 接口本身就带城市名，有就不要再等反向地理编码 ——
+         那一步慢的时候要 5~7 秒，全压在首屏"正在定位…"上 */
+      name: ip.city ? String(ip.city).replace(/市$/, "")
+                    : await reverseName(ip.lat, ip.lon, "", 2500),
+    }))
+    .catch(() => null);
+
+  const results = await Promise.all([geoP, ipP]);
+  const geo = results[0];
+  const ip = results[1];
+
+  /* 选谁：
+     1) IP 结果且时区与本机一致 —— 最可信，优先；
+     2) IP 不可信（时区对不上，说明出口在境外）时，才用系统定位；
+     3) 都没有就退到低可信的 IP 结果。 */
+  let auto = null;
+  if (ip && !ip.lowConfidence) auto = ip;
+  else if (geo) auto = geo;
+  else if (ip) auto = ip;
+
+  if (auto) {
+    return {
+      manual: false, lat: auto.lat, lon: auto.lon, name: auto.name,
+      precise: !!auto.precise, lowConfidence: !!auto.lowConfidence, at: Date.now(),
+    };
+  }
+
+  return {
+    lat: DEFAULT_CITY.lat, lon: DEFAULT_CITY.lon,
+    name: DEFAULT_CITY.name, manual: false, isDefault: true,
+  };
+}
+
+/* ================= 天气数据 ================= */
+async function loadWeather(lat, lon) {
+  const params = [
+    "latitude=" + lat.toFixed(4),
+    "longitude=" + lon.toFixed(4),
+    "current=temperature_2m,apparent_temperature,is_day,weather_code,relative_humidity_2m",
+    "hourly=temperature_2m,weather_code,is_day",
+    "daily=weather_code,temperature_2m_max,temperature_2m_min",
+    "timezone=auto",
+    "forecast_days=4",
+    "wind_speed_unit=kmh",
+  ].join("&");
+  return fetchJSON("https://api.open-meteo.com/v1/forecast?" + params, 12000);
+}
+
+/* ================= 渲染 ================= */
+const state = { place: null, data: null, lastUpdate: 0, loading: false, timer: null };
+
+function render() {
+  const d = state.data;
+  if (!d || !d.current) return;
+
+  const cur = d.current;
+  const isDay = cur.is_day === 1;
+  const info = wmo(cur.weather_code);
+  applySky(info.k, isDay);
+
+  $("cityName").textContent = state.place.name || "当前位置";
+  $("tNum").textContent = Math.round(cur.temperature_2m);
+  $("desc").textContent = info.t;
+
+  const daily = d.daily;
+  const hi = Math.round(daily.temperature_2m_max[0]);
+  const lo = Math.round(daily.temperature_2m_min[0]);
+  $("range").textContent = "最高 " + hi + "° · 最低 " + lo + "° · 体感 " + Math.round(cur.apparent_temperature) + "°";
+
+  $("ico").innerHTML = svgIcon(info.k, isDay);
+
+  /* ---- 未来 5 小时 ---- */
+  const times = d.hourly.time;
+  const nowISO = cur.time;
+  let startIdx = times.indexOf(nowISO);
+  if (startIdx < 0) {
+    startIdx = 0;
+    for (let i = 0; i < times.length; i++) {
+      if (times[i] <= nowISO) startIdx = i; else break;
+    }
+  }
+  const n = Math.min(5, times.length - startIdx);
+  let hs = "";
+  for (let i = 0; i < n; i++) {
+    const idx = startIdx + i;
+    const isNow = i === 0;  // current.time 是 15 分钟精度，首格必须用真实当前值
+    const code = isNow ? cur.weather_code : d.hourly.weather_code[idx];
+    const hDay = isNow ? isDay : d.hourly.is_day[idx] === 1;
+    const hInfo = wmo(code);
+    const t = Math.round(isNow ? cur.temperature_2m : d.hourly.temperature_2m[idx]);
+    const label = isNow ? "现在" : pad2(parseInt(times[idx].slice(11, 13), 10)) + "时";
+    hs += '<div class="hr' + (isNow ? " now" : "") + '">' +
+      '<div class="t">' + label + '</div>' +
+      '<div class="i">' + svgIcon(hInfo.k, hDay) + '</div>' +
+      '<div class="v">' + t + '°</div></div>';
+  }
+  $("hrs").innerHTML = hs;
+
+  /* ---- 未来 3 天 ---- */
+  const wMin = Math.min.apply(null, daily.temperature_2m_min);
+  const wMax = Math.max.apply(null, daily.temperature_2m_max);
+  const span = Math.max(1, wMax - wMin);
+
+  let rs = "";
+  for (let i = 0; i < Math.min(3, daily.time.length); i++) {
+    const di = wmo(daily.weather_code[i]);
+    const dLo = daily.temperature_2m_min[i];
+    const dHi = daily.temperature_2m_max[i];
+
+    /* 温度条：外层裁出这天在整周温标里的区间，内层铺满整周渐变 */
+    let left = ((dLo - wMin) / span) * 100;
+    let w = ((dHi - dLo) / span) * 100;
+    if (w < 6) { left = Math.max(0, left - (6 - w) / 2); w = 6; }
+    const inner = (100 / w) * 100;
+    const innerLeft = -(left / w) * 100;
+
+    rs += '<div class="drow">' +
+      '<div class="dn">' + dayLabel(daily.time[i], i) + '</div>' +
+      '<div class="di">' + svgIcon(di.k, true) + '</div>' +
+      '<div class="bar"><span style="left:' + left.toFixed(2) + '%;width:' + w.toFixed(2) + '%">' +
+        '<i style="left:' + innerLeft.toFixed(2) + '%;width:' + inner.toFixed(2) + '%"></i>' +
+      '</span></div>' +
+      '<div class="dlo">' + Math.round(dLo) + '°</div>' +
+      '<div class="dhi">' + Math.round(dHi) + '°</div>' +
+      '</div>';
+  }
+  $("dys").innerHTML = rs;
+
+  $("ftL").textContent = "更新于 " + hhmm(state.lastUpdate);
+  const p = state.place;
+  $("ftR").textContent = p.manual ? "已固定"
+    : p.precise ? "精确定位"
+    : p.stale ? "沿用上次定位"
+    : p.isDefault ? "未定位成功"
+    : p.lowConfidence ? "网络定位·可能不准"
+    : "网络定位";
+}
+
+/* ================= 启动 / 刷新 ================= */
+
+/* IP 主源给的城市名是英文（Kunming），副源超时没回来时就没法借中文名。
+   这里在后台补一次反向地理编码，拿到中文名再刷一次界面 —— 不挡首屏。 */
+function refineName(place) {
+  if (!place || place.manual || !place.name) return;
+  if (/[\u4e00-\u9fa5]/.test(place.name)) return;   /* 已经是中文，不用折腾 */
+  reverseName(place.lat, place.lon, place.name, 4000).then((n) => {
+    if (n && n !== place.name) {
+      place.name = n;
+      state.place = place;
+      render();
+    }
+  }).catch(() => {});
+}
+async function boot(forceLocate) {
+  if (state.loading) return;
+  state.loading = true;
+  const rb = $("refreshBtn");
+  rb.classList.add("spin");
+
+  try {
+    if (forceLocate) state.place = null;
+
+    let place = state.place;
+    if (!place) {
+      if (forceLocate) {
+        try {
+          localStorage.removeItem(STORE_KEY);   /* 清掉手动选定 */
+          localStorage.removeItem(AUTO_KEY);    /* 也要清掉自动定位缓存，否则会被 30 分钟缓存顶回去 */
+        } catch (e) {}
+      }
+      place = await resolvePlace(forceLocate);
+      state.place = place;
+    }
+
+    const data = await loadWeather(place.lat, place.lon);
+    state.data = data;
+    state.lastUpdate = Date.now();
+    render();
+    refineName(state.place);
+
+    $("boot").classList.add("hide");
+
+    clearInterval(state.timer);
+    state.timer = setInterval(() => {
+      /* 没手动固定、且上次定位超过 30 分钟 → 清空让它重新识别位置 */
+      const cur = state.place;
+      if (cur && !cur.manual && Date.now() - (cur.at || 0) > AUTO_FRESH_MS) {
+        state.place = null;
+      }
+      boot(false);
+    }, 10 * 60 * 1000);
+  } catch (e) {
+    if (state.data) {
+      $("ftL").textContent = "刷新失败 · 显示 " + hhmm(state.lastUpdate) + " 数据";
+    } else {
+      $("boot").textContent = "拿不到天气，点右上角重试";
+      setTimeout(() => $("boot").classList.add("hide"), 2600);
+    }
+  } finally {
+    state.loading = false;
+    rb.classList.remove("spin");
+  }
+}
+
+/* ================= 城市搜索 ================= */
+async function searchCities(q) {
+  const url = "https://geocoding-api.open-meteo.com/v1/search?name=" +
+    encodeURIComponent(q) + "&count=5&language=zh&format=json";
+  return fetchJSON(url, 8000).then((d) => d.results || []).catch(() => []);
+}
+
+function openSearch() {
+  $("search").classList.add("open");
+  const inp = $("q");
+  inp.value = "";
+  $("res").innerHTML = '<div class="tip">输入城市名后回车</div>';
+  setTimeout(() => inp.focus(), 60);
+}
+function closeSearch() { $("search").classList.remove("open"); }
+
+let searchTimer = null;
+async function doSearch(q) {
+  q = (q || "").trim();
+  if (!q) return;
+  $("res").innerHTML = '<div class="tip">搜索中…</div>';
+  const list = await searchCities(q);
+  if (!list.length) {
+    $("res").innerHTML = '<div class="tip">没找到这个城市</div>';
+    return;
+  }
+  $("res").innerHTML = list.map((r, i) => {
+    const sub = [r.admin1, r.country].filter(Boolean).join(" · ");
+    return '<div class="r" data-i="' + i + '"><div><div class="n">' +
+      escapeHTML(r.name) + '</div><div class="m">' + escapeHTML(sub) + '</div></div></div>';
+  }).join("");
+
+  Array.from($("res").querySelectorAll(".r")).forEach((el) => {
+    el.addEventListener("click", () => {
+      const r = list[Number(el.dataset.i)];
+      state.place = { lat: r.latitude, lon: r.longitude, name: r.name, manual: true };
+      writeManual(state.place);
+      closeSearch();
+      boot(false);
+    });
+  });
+}
+
+/* ================= 交互绑定 ================= */
+$("cityBtn").addEventListener("click", openSearch);
+$("menuBtn").addEventListener("click", () => { if (window.wgt) window.wgt.menu(); });
+$("refreshBtn").addEventListener("click", () => boot(false));
+$("closeBtn").addEventListener("click", () => {
+  if (window.wgt) window.wgt.close(); else window.close();
+});
+$("card").addEventListener("contextmenu", (e) => {
+  e.preventDefault();
+  if (window.wgt) window.wgt.menu();
+});
+$("card").addEventListener("dblclick", (e) => {
+  if (e.target.closest(".act") || e.target.closest(".city")) return;
+  boot(false);
+});
+$("q").addEventListener("input", (e) => {
+  clearTimeout(searchTimer);
+  const v = e.target.value;
+  searchTimer = setTimeout(() => doSearch(v), 420);
+});
+$("q").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") { clearTimeout(searchTimer); doSearch(e.target.value); }
+  if (e.key === "Escape") closeSearch();
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") closeSearch();
+  if (e.key === "F5") { e.preventDefault(); boot(false); }
+});
+$("search").addEventListener("click", (e) => { if (e.target === $("search")) closeSearch(); });
+
+if (window.wgt) {
+  window.wgt.onRefresh(() => boot(false));
+  window.wgt.onSearchOpen(openSearch);
+  /* 菜单里的「回到自动定位」：清掉手动选择，重新按定位走一遍 */
+  window.wgt.onRelocate(() => boot(true));
+}
+
+/* 回到前台补一次（超过 3 分钟才拉，避免无意义请求） */
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible" && Date.now() - state.lastUpdate > 3 * 60 * 1000) {
+    boot(false);
+  }
+});
+
+document.body.classList.add(window.wgt && window.wgt.acrylic ? "acrylic" : "solid");
+
+boot(false);   /* 有 30 分钟内的定位结果就直接用，没有再重新识别 */
+</script>
+</body>
+</html>
