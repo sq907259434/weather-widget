@@ -1,7 +1,8 @@
 {
-  "name": "weather-widget",
-  "version": "1.9.1",
-  "description": "A frosted-glass weather widget for the Windows desktop (Electron)",
+  "name": "weather-card",
+  "productName": "WeatherCard",
+  "version": "1.0.0",
+  "description": "天气卡片 —— 桌面磨砂玻璃天气小卡（Electron 独立版）",
   "author": {
     "name": "WeatherWidget Contributors"
   },
@@ -18,8 +19,8 @@
     "electron-builder": "25.1.8"
   },
   "build": {
-    "appId": "com.weatherwidget.desktop",
-    "productName": "WeatherWidget",
+    "appId": "com.weatherwidget.card",
+    "productName": "WeatherCard",
     "copyright": "Copyright © 2026 WeatherWidget Contributors",
     "asar": true,
     "compression": "maximum",
@@ -31,7 +32,6 @@
       "main.js",
       "preload.js",
       "widget.html",
-      "todo.html",
       "icon.png",
       "package.json"
     ],
@@ -64,6 +64,7 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "天气卡片",
+      "uninstallDisplayName": "天气卡片",
       "runAfterFinish": true,
       "deleteAppDataOnUninstall": false,
       "multiLanguageInstaller": true,

@@ -195,5 +195,19 @@ GitHub 首次推送缺 `workflow` 权限，我发起了一个 15 分钟有效的
 
 ---
 
+## 9. v1.0.0 拆分独立版（2026-10-28 下午）
+
+用户决定：合体版到此为止，**天气和待办拆成两个独立项目、各自发布、本地安装包也各出各的**；此前发布的合体版 Release 全部删除。
+
+- 仓库：`weather-widget`（本仓库，只保留天气卡）＋ 新仓库 `todo-widget`（只保留待办卡）
+- 版本：两边都从 `1.0.0` 重新计（合体版历史保留在本仓库 git 与本文档里）
+- 产物：`WeatherCard-1.0.0-x64-setup/portable.exe`、`TodoCard-1.0.0-x64-setup/portable.exe`
+- 拆分方式：`main.js` / `preload.js` 各自裁剪成单卡版本（天气版去掉光标监视、自动高度、中键拖动；待办版去掉 Acrylic、IP 定位）；页面 HTML 零改动
+- **数据迁移**：两个独立版首次启动都会把合体版 `%APPDATA%\weather-widget` 的存档搬过来 —— 窗口位置来自 `widget-state.json`，待办内容/历史来自 `Local Storage\leveldb` 整目录复制。已真机验证：位置与两条待办 + 历史全数到位
+- 全局设置拆分：待办独立版右键菜单里补上了原来挂在天气卡菜单里的「桌面右键菜单显示」（注册表键改用 `TodoWidget`，与 `WeatherWidget` 互不冲突）和「开机自动启动」
+- 踩坑：本机 agent 的 Bash/PowerShell 环境都带 `ELECTRON_RUN_AS_NODE=1`，直接 `electron .` 会被当成纯 Node 或被沙箱静默拦掉；PowerShell 里清掉该变量后一切正常。冒烟测试完删掉了测试生成的 `%APPDATA%\WeatherCard`、`%APPDATA%\TodoCard`，保证真实安装时重新走一遍干净迁移
+
+---
+
 <sub>本文档由 WorkBuddy（DeepSeek-V4.1-Flash）在开发过程中同步整理，最后更新 2026-10-28。
 纯归档，与功能无关，不含任何使用说明。</sub>
