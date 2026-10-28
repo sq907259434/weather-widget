@@ -1059,6 +1059,25 @@ document.addEventListener("visibilitychange", () => {
 
 document.body.classList.add(window.wgt && window.wgt.acrylic ? "acrylic" : "solid");
 
+/* 鼠标指上来就临时浮到最前，移开还原：两张卡是两个窗口，被另一张压住时
+   不抬升就只能先点一下才看得见。临时状态，不改用户设的"窗口置顶"。 */
+const cardBox = document.getElementById("card");
+if (cardBox && window.wgt && window.wgt.raise) {
+  let restTimer = null;
+  cardBox.addEventListener("mouseenter", () => {
+    clearTimeout(restTimer);
+    window.wgt.raise();
+  });
+  cardBox.addEventListener("mouseleave", () => {
+    clearTimeout(restTimer);
+    /* 隔一拍再用 :hover 复核：窗口刚被挪动时 Chromium 偶尔误报离开 */
+    restTimer = setTimeout(() => {
+      if (cardBox.matches(":hover")) return;
+      window.wgt.rest();
+    }, 110);
+  });
+}
+
 boot(false);   /* 有 30 分钟内的定位结果就直接用，没有再重新识别 */
 </script>
 </body>

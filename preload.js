@@ -13,6 +13,13 @@ contextBridge.exposeInMainWorld("wgt", {
   menu: () => ipcRenderer.send("wgt:menu"),
   getTop: () => ipcRenderer.invoke("wgt:get-top"),
   setTop: (v) => ipcRenderer.invoke("wgt:set-top", v),
+  /* 鼠标指上来时临时浮到最前，移开还原（临时状态，不写存档） */
+  raise: () => ipcRenderer.send("wgt:raise"),
+  rest: () => ipcRenderer.send("wgt:rest"),
+  /* 条目按住拖动时，页面按屏幕坐标算位移，由主进程照着挪窗口 */
+  dragBegin: () => ipcRenderer.send("wgt:drag-begin"),
+  dragMove: (dx, dy) => ipcRenderer.send("wgt:drag-move", dx, dy),
+  dragEnd: () => ipcRenderer.send("wgt:drag-end"),
   /* 走主进程查 IP 归属：绕开系统代理，避免定位到代理出口所在的国家 */
   geoIP: () => ipcRenderer.invoke("wgt:geo-ip"),
   /* 唤出另一张卡片（天气 ↔ 待办） */

@@ -484,8 +484,22 @@ app.whenReady().then(() => {
   ipcMain.on("wgt:menu", async (e) => {
     const w = senderWin(e);
     if (!w) return;
-    const m = await buildMenu(kindOf(e));
-    m.popup({ window: w });
+    const kind = kindOf(e);
+    const m = await buildMenu(kind);
+    /* 菜单弹出时卡片会失焦、鼠标也离开页面。标记一下，免得这时候被"还原到后面"，
+       结果菜单还开着、卡片已经被别的窗口盖住。 */
+    w.__menuOpen = true;
+    w.__restPending = false;
+    m.popup({
+      window: w,
+      callback: () => {
+        if (w.isDestroyed()) return;
+        w.__menuOpen = false;
+        if (!w.__restPending) return;
+        w.__restPending = false;
+        w.setAlwaysOnTop(readCardState(kind).top === true, "floating");
+      },
+    });
   });
 
   ipcMain.handle("wgt:get-top", (e) => readCardState(kindOf(e)).top === true);
@@ -495,6 +509,57 @@ app.whenReady().then(() => {
     const w = senderWin(e);
     if (w) w.setAlwaysOnTop(!!v, "floating");
     return !!v;
+  });
+
+  /* ---------- 鼠标指上来就临时浮到最前 ----------
+     两张卡是两个独立窗口，谁在上由系统 z 序决定。用户把天气卡拖到待办卡上，
+     待办卡就被压住了；按以前的逻辑只有"点一下"（窗口被激活）才会浮上来。
+     这里改成 hover 即抬升、移开即还原 —— 都是临时的，不写进存档，
+     用户自己在菜单里设的"窗口置顶"不能被它改掉。 */
+  ipcMain.on("wgt:raise", (e) => {
+    const w = senderWin(e);
+    if (!w || w.isDestroyed()) return;
+    w.__hoverTop = true;
+    if (!w.isAlwaysOnTop()) w.setAlwaysOnTop(true, "floating");
+    /* ★ 只打上"置顶"这个样式并不会改变它在置顶层里的前后位置：
+       另一张卡本来就是置顶的（或者刚被系统排到前面）时，光 setAlwaysOnTop
+       翻不上去 —— 实测 z 序一点没变。必须再主动提一次。 */
+    w.moveTop();
+  });
+
+  ipcMain.on("wgt:rest", (e) => {
+    const w = senderWin(e);
+    if (!w || w.isDestroyed()) return;
+    w.__hoverTop = false;
+    if (w.__menuOpen) { w.__restPending = true; return; }   /* 菜单还开着，等它关了再沉 */
+    w.setAlwaysOnTop(readCardState(kindOf(e)).top === true, "floating");
+  });
+
+  /* ---------- 由页面发起的拖窗 ----------
+     条目本身必须吃掉 mousedown（要判双击、要支持右滑删除），所以它不能直接做
+     -webkit-app-region: drag。这里退一步：页面按屏幕坐标算位移，主进程照着挪窗口。
+     用屏幕坐标而不是 client 坐标 —— 窗口一动，client 坐标就失真，屏幕坐标不会。 */
+  ipcMain.on("wgt:drag-begin", (e) => {
+    const w = senderWin(e);
+    if (!w || w.isDestroyed()) return;
+    w.__dragFrom = w.getBounds();
+  });
+
+  ipcMain.on("wgt:drag-move", (e, dx, dy) => {
+    const w = senderWin(e);
+    if (!w || w.isDestroyed() || !w.__dragFrom) return;
+    const f = w.__dragFrom;
+    w.setPosition(Math.round(f.x + (Number(dx) || 0)), Math.round(f.y + (Number(dy) || 0)));
+    /* 兜底：鼠标冲出窗口后页面可能再也收不到事件，别让窗口一直黏着鼠标 */
+    clearTimeout(w.__dragTimer);
+    w.__dragTimer = setTimeout(() => { if (!w.isDestroyed()) w.__dragFrom = null; }, 1200);
+  });
+
+  ipcMain.on("wgt:drag-end", (e) => {
+    const w = senderWin(e);
+    if (!w || w.isDestroyed()) return;
+    clearTimeout(w.__dragTimer);
+    w.__dragFrom = null;
   });
 
   ipcMain.handle("wgt:geo-ip", async () => {
