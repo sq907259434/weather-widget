@@ -246,3 +246,7 @@ weather-widget/
 ## License
 
 [MIT](LICENSE)
+
+---
+
+<sub>开发记录（对话过程、需求变更、AI 踩坑清单）→ [docs/DEVLOG.md](docs/DEVLOG.md)　·　本项目由 WorkBuddy + DeepSeek-V4.1-Flash 协作完成，此文档纯归档，与功能无关</sub>
