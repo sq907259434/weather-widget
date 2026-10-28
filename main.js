@@ -67,6 +67,31 @@ function setWin(kind, w) {
   if (kind === "todo") todoWin = w; else weatherWin = w;
 }
 
+/* ---------- 光标到底还在不在窗口里 ----------
+   待办卡靠"鼠标在不在"决定展开/收起。以前只看页面自己的 mouseenter/mouseleave，
+   但页面那一路在窗口自己变高、往上挪的时候会误判：展开时窗口顶边上移 63px，
+   Chromium 按旧坐标重新命中一次，就会甩一个假的 mouseleave。
+   假离开不只是闪一下 —— 它会顺手把"临时置顶"撤掉，卡片沉到别的窗口后面，
+   看起来就是"鼠标明明还在框里，它自己隐藏了"。
+   所以判据换成系统光标：screen.getCursorScreenPoint() 跟窗口矩形比，
+   只在"变化"时通知页面。页面那边把 false 当唯一可以收起的理由。 */
+function watchCursor(w) {
+  w.__cursorInside = null;
+  w.__cursorTimer = setInterval(() => {
+    if (w.isDestroyed() || !w.webContents || w.webContents.isDestroyed()) {
+      clearInterval(w.__cursorTimer);
+      return;
+    }
+    if (!w.isVisible() || w.isMinimized()) return;
+    const p = screen.getCursorScreenPoint();
+    const b = w.getBounds();
+    const inside = p.x >= b.x && p.x < b.x + b.width && p.y >= b.y && p.y < b.y + b.height;
+    if (inside === w.__cursorInside) return;
+    w.__cursorInside = inside;
+    try { w.webContents.send("wgt:cursor", { inside }); } catch (e) {}
+  }, 90);
+}
+
 const stateFile = () => path.join(app.getPath("userData"), "widget-state.json");
 
 function readState() {
@@ -202,6 +227,9 @@ function createWindow(kind) {
 
   w.once("ready-to-show", () => { w.show(); });
 
+  /* 待办卡的收放要看"光标到底还在不在窗口里"，这件事只有系统知道 */
+  if (kind === "todo") watchCursor(w);
+
   /* 位置记忆（拖动会高频触发，做节流） */
   let moveTimer = null;
   w.on("moved", () => {
@@ -224,6 +252,7 @@ function createWindow(kind) {
   });
 
   w.on("closed", () => {
+    if (w.__cursorTimer) clearInterval(w.__cursorTimer);
     setWin(kind, null);
     if (app.__quitting) return;
     /* 只有在"还有别的卡开着"时才算用户单独关掉这张。
@@ -535,32 +564,8 @@ app.whenReady().then(() => {
     w.setAlwaysOnTop(readCardState(kindOf(e)).top === true, "floating");
   });
 
-  /* ---------- 由页面发起的拖窗 ----------
-     条目本身必须吃掉 mousedown（要判双击、要支持右滑删除），所以它不能直接做
-     -webkit-app-region: drag。这里退一步：页面按屏幕坐标算位移，主进程照着挪窗口。
-     用屏幕坐标而不是 client 坐标 —— 窗口一动，client 坐标就失真，屏幕坐标不会。 */
-  ipcMain.on("wgt:drag-begin", (e) => {
-    const w = senderWin(e);
-    if (!w || w.isDestroyed()) return;
-    w.__dragFrom = w.getBounds();
-  });
-
-  ipcMain.on("wgt:drag-move", (e, dx, dy) => {
-    const w = senderWin(e);
-    if (!w || w.isDestroyed() || !w.__dragFrom) return;
-    const f = w.__dragFrom;
-    w.setPosition(Math.round(f.x + (Number(dx) || 0)), Math.round(f.y + (Number(dy) || 0)));
-    /* 兜底：鼠标冲出窗口后页面可能再也收不到事件，别让窗口一直黏着鼠标 */
-    clearTimeout(w.__dragTimer);
-    w.__dragTimer = setTimeout(() => { if (!w.isDestroyed()) w.__dragFrom = null; }, 1200);
-  });
-
-  ipcMain.on("wgt:drag-end", (e) => {
-    const w = senderWin(e);
-    if (!w || w.isDestroyed()) return;
-    clearTimeout(w.__dragTimer);
-    w.__dragFrom = null;
-  });
+  /* 拖窗由页面自己处理：顶栏就是标题栏（-webkit-app-region: drag），
+     按住顶栏拖是系统原生行为，不需要主进程插手。 */
 
   ipcMain.handle("wgt:geo-ip", async () => {
     try {

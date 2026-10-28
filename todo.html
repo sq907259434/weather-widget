@@ -65,9 +65,13 @@
   }
 
   /* ---------- 顶栏 ---------- */
+  /* 顶栏就是这张卡的标题栏：按住这里拖窗口，鼠标保持箭头（跟资源管理器、
+     浏览器标签栏一样）。别处不给拖动提示，条文也不会变成"抓手"。 */
   .hd{
     height:22px; flex:0 0 auto;
     display:flex; align-items:center; justify-content:space-between;
+    -webkit-app-region: drag;
+    cursor: default;
   }
   .ttl{
     display:flex; align-items:baseline; gap:6px;
@@ -174,19 +178,12 @@
     box-shadow:inset 0 0 0 1px rgba(255,255,255,.13);
     will-change:transform;
     transition:transform .18s cubic-bezier(.2,.8,.3,1), background .15s ease, opacity .18s ease, box-shadow .15s ease;
-    /* 整条都能按住拖窗口（上下 / 往左 / 长按后任意方向），光标得给个提示，
-       否则没人会想到任务框本身可以拖着走 */
-    cursor:grab;
+    /* 条文只用来点、双击、右滑，不做拖动把手 —— 光标保持箭头，
+       要挪窗口请按顶栏（标题栏）。 */
+    cursor:default;
   }
   .item:hover{ background:rgba(16,22,36,.64); }
   .item.dragging{ transition:none; }
-  /* 按住不放 / 上下拖：进入"挪窗口"状态，给一点抬起的反馈，
-     否则用户不知道整张卡是可以挪的（条目上原本没有拖动把手）。 */
-  .item.lift{
-    background:rgba(16,22,36,.74);
-    box-shadow:0 6px 18px rgba(0,0,0,.42), inset 0 0 0 1px rgba(255,255,255,.24);
-    cursor:grabbing;
-  }
   .item.removing{
     transform:translateX(110%);
     opacity:0;
@@ -727,37 +724,65 @@ function applySolo() {
 
 const cardEl = $("card");
 
-/* 鼠标离开整张卡 = 这次输入结束了。给 320ms 反悔时间（只是划过去不算），
-   真的走了就把输入框里的话收进待办并松开焦点。 */
-let leaveTimer = null;
+/* ================= 什么才算"真的离开了" =================
+   收起这张卡只有一个理由：光标真的不在窗口里了。
 
-cardEl.addEventListener("mouseenter", () => {
+   页面自己的 mouseleave 不够格当这个理由 —— 展开时窗口自己往上长 63px、
+   高度 +77px，Chromium 会按旧坐标重新命中一次，偶尔甩一个假的 mouseleave。
+   假离开不只是闪一下：它会连带把"临时置顶"撤掉，卡片沉到别的窗口后面，
+   看起来就是"鼠标明明还在框里，它自己隐藏了"。
+
+   所以主进程每 90ms 用系统光标跟窗口矩形比一次，只在变化时推 wgt:cursor。
+   sysInside 只有拿到真实值才生效；拿不到（老版本 preload / 页面测试桩）时保持
+   老的 :hover 判定，不能因为"不知道"就把卡片永远钉住。 */
+let sysInside = null;        /* null = 还不知道，按老规矩来 */
+let leaveTimer = null, collapseTimer = null;
+
+function enterFrame() {
   clearTimeout(leaveTimer);
+  clearTimeout(collapseTimer);
   hovering = true;
   /* 鼠标指上来就浮到最前：两张卡各是一个窗口，谁在上由系统决定。天气卡被拖到
      这张上面时，这张会被压住 —— 以前只有"点一下"（窗口被激活）才浮上来。
      抬升是临时的，移开就还原，不动用户自己设的"窗口置顶"。 */
   if (window.wgt && window.wgt.raise) window.wgt.raise();
   if (applyFull()) syncHeight(true);
-});
+}
 
-cardEl.addEventListener("mouseleave", () => {
+/* 鼠标离开整张卡 = 这次输入结束了。给 320ms 反悔时间（只是划过去不算），
+   真的走了就把输入框里的话收进待办并松开焦点。 */
+function leaveFrame() {
   clearTimeout(leaveTimer);
   if (inp.value.trim() && document.activeElement === inp) {
     leaveTimer = setTimeout(() => {
+      if (sysInside === true) return;
       if (cardEl.matches(":hover")) return;
       if (commitInput()) inp.blur();
     }, 320);
   }
 
-  /* 窗口刚被挪动时 Chromium 偶尔误报离开，隔一拍再用 :hover 复核，避免抖 */
-  setTimeout(() => {
+  clearTimeout(collapseTimer);
+  collapseTimer = setTimeout(() => {
+    if (sysInside === true) return;      /* 光标还在窗口里 —— 这声 leave 是假的 */
     if (cardEl.matches(":hover")) return;
     hovering = false;
     if (window.wgt && window.wgt.rest) window.wgt.rest();
     if (applyFull()) syncHeight(true);
-  }, 110);
-});
+  }, 120);
+}
+
+cardEl.addEventListener("mouseenter", enterFrame);
+cardEl.addEventListener("mouseleave", leaveFrame);
+
+/* 系统那一路：光标进出窗口矩形时推一次。它不受窗口重排影响，是唯一的真话。 */
+if (window.wgt && window.wgt.onCursor) {
+  window.wgt.onCursor((p) => {
+    const inside = !!(p && p.inside);
+    if (inside === sysInside) return;
+    sysInside = inside;
+    if (inside) enterFrame(); else leaveFrame();
+  });
+}
 
 /* 只有输入框算"正在打字"。勾选/删除按钮点完也拿焦点，那种不算，
    否则点一下就永久展开、再也收不回去。 */
@@ -929,52 +954,15 @@ list.addEventListener("blur", (e) => {
   endEdit(true, el);
 }, true);
 
-/* ================= 交互：完成 / 删除 / 右滑删除 / 按住挪窗口 =================
-   条目把 mousedown 全吃了（要判双击、要跟手右滑），所以它不能做
-   -webkit-app-region:drag。挪窗口改成自己算：
-     · 上下拖、往左拖      → 挪窗口
-     · 往右拖              → 右滑删除（老手势，优先判，绝不会被挪窗口抢走）
-     · 按住不动一会儿再拖  → 也挪窗口（左右都行，给"只想平移"的人）
-   位移一律用屏幕坐标：窗口一动，client 坐标立刻失真，屏幕坐标不会。 */
-let drag = null;            /* { item,row,id,startX,startY,sx0,sy0,mode,dx,moved } */
-let winDrag = null;         /* 正在挪窗口：{ sx, sy } 屏幕坐标起点 */
-let holdTimer = null;
-let suppressClick = false;  /* 刚滑完/刚挪完，紧接着的 click 要吞掉，别误标完成 */
+/* ================= 交互：完成 / 删除 / 右滑删除 =================
+   条目只做三件事：单击勾选、双击改字、按住往右滑删除。
+   挪窗口不在这里 —— 顶栏是标题栏（-webkit-app-region: drag），
+   按住顶栏拖就跟资源管理器一样，光标全程是箭头。 */
+let drag = null;            /* { item,row,id,startX,dx,moved } */
+let suppressClick = false;  /* 刚滑完，紧接着的 click 要吞掉，别误标完成 */
 let lastTap = { id: null, t: 0, x: 0, y: 0 };   /* 自己判双击用 */
 
 const THRESHOLD = 82;   /* 滑过这个距离就删（约 1/3 卡宽） */
-const HOLD_MS = 260;    /* 按住不动这么久 = 抬起来，之后往哪拖都是挪窗口 */
-
-/* 拖窗口的收尾。为什么要做得这么啰嗦：窗口是跟着鼠标走的，
-   松手那一刻如果鼠标刚好在窗口外面（拖太快、窗口没跟上），
-   mouseup 会落到别的窗口，页面根本收不到 —— 不兜底的话窗口会一直黏着鼠标。 */
-let winDragTimer = null;
-
-function endWinDrag() {
-  clearTimeout(winDragTimer);
-  if (!winDrag) return;
-  winDrag = null;
-  window.wgt.dragEnd();
-  if (drag) { drag.item.classList.remove("lift"); drag.item.style.transform = ""; }
-  drag = null;
-  suppressClick = true;
-  setTimeout(() => { suppressClick = false; }, 0);
-}
-
-function pokeWinDrag() {
-  clearTimeout(winDragTimer);
-  winDragTimer = setTimeout(endWinDrag, 700);   /* 700ms 一点动静都没有 = 已经松手了 */
-}
-
-function startWinDrag() {
-  if (winDrag) return;
-  winDrag = { sx: drag.sx0, sy: drag.sy0 };
-  drag.item.classList.remove("dragging");
-  drag.row.classList.remove("armed", "drag-bg");
-  drag.item.classList.add("lift");     /* 有点"抬起来"的反馈，否则用户不知道能拖 */
-  window.wgt.dragBegin();
-  pokeWinDrag();
-}
 
 list.addEventListener("mousedown", (e) => {
   if (e.button !== 0) return;
@@ -1003,51 +991,24 @@ list.addEventListener("mousedown", (e) => {
     row: item.parentElement,
     id: item.dataset.id,
     startX: e.clientX,
-    startY: e.clientY,
-    sx0: e.screenX,
-    sy0: e.screenY,
-    mode: "pending",          /* pending | swipe | win */
+    mode: "pending",          /* pending | swipe */
     dx: 0,
     moved: false,
   };
-
-  clearTimeout(holdTimer);
-  holdTimer = setTimeout(() => {
-    if (!drag || drag.mode !== "pending") return;
-    drag.mode = "win";        /* 按住不放 = 准备挪窗口（此时还没动，不真的挪） */
-    drag.item.classList.add("lift");
-  }, HOLD_MS);
 
   e.preventDefault();     /* 防止拖出文字选区 */
 });
 
 window.addEventListener("mousemove", (e) => {
-  /* 正在挪窗口：只跟屏幕坐标走，别的判定全停 */
-  if (winDrag) {
-    if (e.buttons === 0) { endWinDrag(); return; }   /* 松手了，只是 mouseup 落在窗口外 */
-    pokeWinDrag();
-    window.wgt.dragMove(e.screenX - winDrag.sx, e.screenY - winDrag.sy);
-    return;
-  }
   if (!drag) return;
 
   if (drag.mode === "pending") {
-    const mx = e.screenX - drag.sx0;
-    const my = e.screenY - drag.sy0;
-    if (mx > 6 && mx >= Math.abs(my)) drag.mode = "swipe";      /* 右滑删除优先 */
-    else if (Math.abs(my) > 6) drag.mode = "win";               /* 上下拖 = 挪窗口 */
-    else if (mx < -12) drag.mode = "win";                       /* 往左拖 = 挪窗口 */
+    const dx0 = e.clientX - drag.startX;
+    if (dx0 > 6) drag.mode = "swipe";       /* 只认右滑；竖向拖动不再牵动窗口 */
     else return;
   }
 
-  if (drag.mode === "win") {
-    clearTimeout(holdTimer);
-    startWinDrag();
-    window.wgt.dragMove(e.screenX - winDrag.sx, e.screenY - winDrag.sy);
-    return;
-  }
-
-  /* ---------- 右滑删除（原逻辑） ---------- */
+  /* ---------- 右滑删除 ---------- */
   const dx = e.clientX - drag.startX;
 
   /* 只允许往右滑；往左给一点阻尼回弹感（不跟手） */
@@ -1066,15 +1027,11 @@ window.addEventListener("mousemove", (e) => {
 });
 
 window.addEventListener("mouseup", () => {
-  clearTimeout(holdTimer);
-
-  if (winDrag) { endWinDrag(); return; }   /* 挪完窗口：位置由主进程的 moved 事件记住 */
-
   if (!drag) return;
   const d = drag;
   drag = null;
 
-  d.item.classList.remove("dragging", "lift");
+  d.item.classList.remove("dragging");
 
   if (!d.moved) {                     /* 只是点了一下，交给 click 处理 */
     d.item.style.transform = "";

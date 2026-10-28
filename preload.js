@@ -16,10 +16,9 @@ contextBridge.exposeInMainWorld("wgt", {
   /* 鼠标指上来时临时浮到最前，移开还原（临时状态，不写存档） */
   raise: () => ipcRenderer.send("wgt:raise"),
   rest: () => ipcRenderer.send("wgt:rest"),
-  /* 条目按住拖动时，页面按屏幕坐标算位移，由主进程照着挪窗口 */
-  dragBegin: () => ipcRenderer.send("wgt:drag-begin"),
-  dragMove: (dx, dy) => ipcRenderer.send("wgt:drag-move", dx, dy),
-  dragEnd: () => ipcRenderer.send("wgt:drag-end"),
+  /* 系统光标是否还在窗口矩形内（主进程按 90ms 轮询，只在变化时推）。
+     页面自己的 mouseleave 在窗口重排时会误报，收起这件事以这条为准。 */
+  onCursor: (fn) => ipcRenderer.on("wgt:cursor", (_e, p) => fn(p || {})),
   /* 走主进程查 IP 归属：绕开系统代理，避免定位到代理出口所在的国家 */
   geoIP: () => ipcRenderer.invoke("wgt:geo-ip"),
   /* 唤出另一张卡片（天气 ↔ 待办） */
