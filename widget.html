@@ -323,7 +323,7 @@
 </div>
 
 <div class="search" id="search">
-  <input id="q" type="text" placeholder="搜索城市，如 上海 / Tokyo" autocomplete="off">
+  <input id="q" type="text" placeholder="搜索城市：上海 / km / Tokyo" autocomplete="off">
   <div class="res" id="res"><div class="tip">输入城市名后回车</div></div>
 </div>
 
@@ -971,10 +971,120 @@ async function boot(forceLocate) {
 }
 
 /* ================= 城市搜索 ================= */
+/* —— 内置拼音表：支持「km」（首字母）/「kunming」（全拼）搜中国城市 ——
+   只存 [中文名, 全拼(空格分音节)]，首字母与连写拼音运行时算出。
+   表只用来「展开查询词」，坐标与行政区信息仍由 geocoding API 提供，不本地存坐标。 */
+const PYCITY = [
+  ["北京","bei jing"],["上海","shang hai"],["天津","tian jin"],["重庆","chong qing"],
+  ["广州","guang zhou"],["深圳","shen zhen"],["珠海","zhu hai"],["汕头","shan tou"],["佛山","fo shan"],
+  ["韶关","shao guan"],["湛江","zhan jiang"],["肇庆","zhao qing"],["江门","jiang men"],["茂名","mao ming"],
+  ["惠州","hui zhou"],["梅州","mei zhou"],["汕尾","shan wei"],["河源","he yuan"],["阳江","yang jiang"],
+  ["清远","qing yuan"],["东莞","dong guan"],["中山","zhong shan"],["潮州","chao zhou"],["揭阳","jie yang"],["云浮","yun fu"],
+  ["南京","nan jing"],["苏州","su zhou"],["无锡","wu xi"],["常州","chang zhou"],["镇江","zhen jiang"],
+  ["南通","nan tong"],["扬州","yang zhou"],["泰州","tai zhou"],["徐州","xu zhou"],["连云港","lian yun gang"],
+  ["淮安","huai an"],["盐城","yan cheng"],["宿迁","su qian"],
+  ["杭州","hang zhou"],["宁波","ning bo"],["温州","wen zhou"],["嘉兴","jia xing"],["湖州","hu zhou"],
+  ["绍兴","shao xing"],["金华","jin hua"],["衢州","qu zhou"],["舟山","zhou shan"],["台州","tai zhou"],["丽水","li shui"],
+  ["济南","ji nan"],["青岛","qing dao"],["淄博","zi bo"],["枣庄","zao zhuang"],["东营","dong ying"],
+  ["烟台","yan tai"],["潍坊","wei fang"],["济宁","ji ning"],["泰安","tai an"],["威海","wei hai"],
+  ["日照","ri zhao"],["临沂","lin yi"],["德州","de zhou"],["聊城","liao cheng"],["滨州","bin zhou"],["菏泽","he ze"],
+  ["郑州","zheng zhou"],["开封","kai feng"],["洛阳","luo yang"],["平顶山","ping ding shan"],["安阳","an yang"],
+  ["鹤壁","he bi"],["新乡","xin xiang"],["焦作","jiao zuo"],["濮阳","pu yang"],["许昌","xu chang"],
+  ["漯河","luo he"],["三门峡","san men xia"],["南阳","nan yang"],["商丘","shang qiu"],["信阳","xin yang"],
+  ["周口","zhou kou"],["驻马店","zhu ma dian"],
+  ["武汉","wu han"],["黄石","huang shi"],["十堰","shi yan"],["宜昌","yi chang"],["襄阳","xiang yang"],
+  ["鄂州","e zhou"],["荆门","jing men"],["孝感","xiao gan"],["荆州","jing zhou"],["黄冈","huang gang"],
+  ["咸宁","xian ning"],["随州","sui zhou"],["恩施","en shi"],["仙桃","xian tao"],["潜江","qian jiang"],["天门","tian men"],
+  ["长沙","chang sha"],["株洲","zhu zhou"],["湘潭","xiang tan"],["衡阳","heng yang"],["邵阳","shao yang"],
+  ["岳阳","yue yang"],["常德","chang de"],["张家界","zhang jia jie"],["益阳","yi yang"],["郴州","chen zhou"],
+  ["永州","yong zhou"],["怀化","huai hua"],["娄底","lou di"],["湘西","xiang xi"],
+  ["石家庄","shi jia zhuang"],["唐山","tang shan"],["秦皇岛","qin huang dao"],["邯郸","han dan"],["邢台","xing tai"],
+  ["保定","bao ding"],["张家口","zhang jia kou"],["承德","cheng de"],["沧州","cang zhou"],["廊坊","lang fang"],["衡水","heng shui"],
+  ["太原","tai yuan"],["大同","da tong"],["阳泉","yang quan"],["长治","chang zhi"],["晋城","jin cheng"],
+  ["朔州","shuo zhou"],["晋中","jin zhong"],["运城","yun cheng"],["忻州","xin zhou"],["临汾","lin fen"],["吕梁","lv liang"],
+  ["呼和浩特","hu he hao te"],["包头","bao tou"],["乌海","wu hai"],["赤峰","chi feng"],["通辽","tong liao"],
+  ["鄂尔多斯","e er duo si"],["呼伦贝尔","hu lun bei er"],["巴彦淖尔","ba yan nao er"],["乌兰察布","wu lan cha bu"],
+  ["沈阳","shen yang"],["大连","da lian"],["鞍山","an shan"],["抚顺","fu shun"],["本溪","ben xi"],
+  ["丹东","dan dong"],["锦州","jin zhou"],["营口","ying kou"],["阜新","fu xin"],["辽阳","liao yang"],
+  ["盘锦","pan jin"],["铁岭","tie ling"],["朝阳","chao yang"],["葫芦岛","hu lu dao"],
+  ["长春","chang chun"],["吉林","ji lin"],["四平","si ping"],["辽源","liao yuan"],["通化","tong hua"],
+  ["白山","bai shan"],["松原","song yuan"],["白城","bai cheng"],["延边","yan bian"],
+  ["哈尔滨","ha er bin"],["齐齐哈尔","qi qi ha er"],["鸡西","ji xi"],["鹤岗","he gang"],["双鸭山","shuang ya shan"],
+  ["大庆","da qing"],["伊春","yi chun"],["佳木斯","jia mu si"],["七台河","qi tai he"],["牡丹江","mu dan jiang"],
+  ["黑河","hei he"],["绥化","sui hua"],
+  ["南宁","nan ning"],["柳州","liu zhou"],["桂林","gui lin"],["梧州","wu zhou"],["北海","bei hai"],
+  ["防城港","fang cheng gang"],["钦州","qin zhou"],["贵港","gui gang"],["玉林","yu lin"],["百色","bai se"],
+  ["贺州","he zhou"],["河池","he chi"],["来宾","lai bin"],["崇左","chong zuo"],
+  ["海口","hai kou"],["三亚","san ya"],["三沙","san sha"],["儋州","dan zhou"],
+  ["成都","cheng du"],["自贡","zi gong"],["攀枝花","pan zhi hua"],["泸州","lu zhou"],["德阳","de yang"],
+  ["绵阳","mian yang"],["广元","guang yuan"],["遂宁","sui ning"],["内江","nei jiang"],["乐山","le shan"],
+  ["南充","nan chong"],["眉山","mei shan"],["宜宾","yi bin"],["广安","guang an"],["达州","da zhou"],
+  ["雅安","ya an"],["巴中","ba zhong"],["资阳","zi yang"],["阿坝","a ba"],["甘孜","gan zi"],["凉山","liang shan"],
+  ["贵阳","gui yang"],["六盘水","liu pan shui"],["遵义","zun yi"],["安顺","an shun"],["毕节","bi jie"],
+  ["铜仁","tong ren"],["黔西南","qian xi nan"],["黔东南","qian dong nan"],["黔南","qian nan"],
+  ["昆明","kun ming"],["曲靖","qu jing"],["玉溪","yu xi"],["保山","bao shan"],["昭通","zhao tong"],
+  ["丽江","li jiang"],["普洱","pu er"],["临沧","lin cang"],["大理","da li"],["楚雄","chu xiong"],
+  ["红河","hong he"],["文山","wen shan"],["西双版纳","xi shuang ban na"],["德宏","de hong"],["怒江","nu jiang"],["迪庆","di qing"],
+  ["拉萨","la sa"],["日喀则","ri ka ze"],["昌都","chang du"],["林芝","lin zhi"],["山南","shan nan"],["那曲","na qu"],
+  ["西安","xi an"],["铜川","tong chuan"],["宝鸡","bao ji"],["咸阳","xian yang"],["渭南","wei nan"],
+  ["延安","yan an"],["汉中","han zhong"],["榆林","yu lin"],["安康","an kang"],["商洛","shang luo"],
+  ["兰州","lan zhou"],["嘉峪关","jia yu guan"],["金昌","jin chang"],["白银","bai yin"],["天水","tian shui"],
+  ["武威","wu wei"],["张掖","zhang ye"],["平凉","ping liang"],["酒泉","jiu quan"],["庆阳","qing yang"],
+  ["定西","ding xi"],["陇南","long nan"],["临夏","lin xia"],["甘南","gan nan"],
+  ["西宁","xi ning"],["海东","hai dong"],
+  ["银川","yin chuan"],["石嘴山","shi zui shan"],["吴忠","wu zhong"],["固原","gu yuan"],["中卫","zhong wei"],
+  ["乌鲁木齐","wu lu mu qi"],["克拉玛依","ke la ma yi"],["吐鲁番","tu lu fan"],["哈密","ha mi"],
+  ["喀什","ka shi"],["阿克苏","a ke su"],["和田","he tian"],["伊宁","yi ning"],["库尔勒","ku er le"],["昌吉","chang ji"],
+  ["香港","xiang gang"],["澳门","ao men"],["台北","tai bei"],["高雄","gao xiong"],["台中","tai zhong"],["台南","tai nan"]
+];
+let PYIDX = null;
+function pyIndex() {
+  if (!PYIDX) {
+    PYIDX = PYCITY.map(function (it) {
+      const s = it[1].split(" ");
+      return { n: it[0], py: s.join(""), ab: s.map(function (x) { return x[0]; }).join("") };
+    });
+  }
+  return PYIDX;
+}
+/* 纯字母查询 → 候选中文城市名（最多 4 个）。精确命中排前面。 */
+function expandQuery(q) {
+  const hits = pyIndex().filter(function (c) {
+    return c.ab === q || c.py === q ||
+      (q.length >= 3 && c.py.indexOf(q) === 0) ||
+      (q.length >= 2 && c.ab.indexOf(q) === 0);
+  });
+  hits.sort(function (a, b) {
+    return (b.ab === q) - (a.ab === q) || (b.py === q) - (a.py === q);
+  });
+  return hits.slice(0, 4).map(function (c) { return c.n; });
+}
+
+function geoURL(name) {
+  return "https://geocoding-api.open-meteo.com/v1/search?name=" +
+    encodeURIComponent(name) + "&count=5&language=zh&format=json";
+}
 async function searchCities(q) {
-  const url = "https://geocoding-api.open-meteo.com/v1/search?name=" +
-    encodeURIComponent(q) + "&count=5&language=zh&format=json";
-  return fetchJSON(url, 8000).then((d) => d.results || []).catch(() => []);
+  const isAscii = /^[a-z]+$/i.test(q.trim());
+  const direct = fetchJSON(geoURL(q), 8000).then((d) => d.results || []).catch(() => []);
+  /* 字母查询时并行做本地展开（km → 昆明）；中文/混合查询不需要 */
+  let extra = Promise.resolve([]);
+  if (isAscii && q.trim().length <= 6) {
+    const names = expandQuery(q.trim().toLowerCase());
+    if (names.length) {
+      extra = Promise.all(names.map((n) =>
+        fetchJSON(geoURL(n), 8000).then((d) => d.results || []).catch(() => [])
+      )).then((arrs) => arrs.flat());
+    }
+  }
+  const [a, b] = await Promise.all([direct, extra]);
+  const seen = new Set(); const out = [];
+  for (const r of a.concat(b)) {
+    const k = r.name + "|" + r.latitude + "," + r.longitude;
+    if (!seen.has(k)) { seen.add(k); out.push(r); }
+    if (out.length >= 8) break;
+  }
+  return out;
 }
 
 function openSearch() {
