@@ -43,11 +43,10 @@ const CARDS = {
     stateKey: "todo",
     title: "待办卡片",
     /* 高度由页面自己报：几条就多高，1 条最矮，每多一条 +33。
-       minH 只用来兜底防算出离谱的小值，不再代表"空状态高度"——
-       旧版把 minH 钉在 211（= 3 行），导致只有 1、2 条时也占 3 条的地方。
+       v1.5.0 起收起状态只有条目，1 条时卡片约 58px，所以 minH 降到 50。
        maxH 在运行时按屏幕工作区再算。 */
     autoHeight: true,
-    minH: 120,
+    minH: 50,
   },
 };
 
@@ -171,9 +170,10 @@ function createWindow(kind) {
 
   if (top) w.setAlwaysOnTop(true, "floating");
 
-  /* 用户亲手摆的顶边坐标。自动伸缩时以它为锚：
-     放得下就回这个位置，放不下才从当前底边往上长。 */
-  w.__baseY = y;
+  /* 锚点不用顶边，用"待办条目在屏幕上的 y"（__rowsY）。
+     卡片悬停展开时顶栏+输入条会把条目往下推 65px，只有咬住条目本身，
+     鼠标底下的行才不会动。第一次由页面报高度时按当时的窗口位置推出来。 */
+  w.__rowsY = null;
 
   /* 定位权限放行，拿不到会自动降级到网络定位（只有天气卡片用得到） */
   if (kind === "weather") {
@@ -191,24 +191,37 @@ function createWindow(kind) {
   /* 位置记忆（拖动会高频触发，做节流） */
   let moveTimer = null;
   w.on("moved", () => {
-    /* 自动长高/缩矮时我们会自己改 y（贴底时向上长），那不是用户拖的，别覆盖存档。
-       用"目标 y 精确比对"而不是时间窗：setBounds 触发的 moved 在 Windows 上
-       可能晚到，靠计时器复位容易漏判。 */
+    /* 自动伸缩时我们会自己改 y（展开时向上长、长高了贴底时往上顶），
+       那不是用户拖的，别覆盖存档。用"目标 y 精确比对"而不是时间窗：
+       setBounds 触发的 moved 在 Windows 上可能晚到，靠计时器复位容易漏判。 */
     const b = w.getBounds();
     if (w.__autoY != null && b.y === w.__autoY) return;
     w.__autoY = null;
-    w.__baseY = b.y;      /* 用户亲手摆的位置，之后自动伸缩都以它为锚 */
+    w.__rowsY = b.y + PAD + (w.__top || 0);   /* 锚点跟着用户整体平移 */
     clearTimeout(moveTimer);
     moveTimer = setTimeout(() => {
       if (w.isDestroyed()) return;
       const bb = w.getBounds();
-      patchCardState(kind, { x: bb.x, y: bb.y });
+      /* 存“收起状态”的顶边：拖动只可能在展开时发生（顶栏才看得见），
+         直接存当前 y 的话，下次启动卡片会比用户摆的高 65px。 */
+      const idleY = Math.round(bb.y + (w.__top || 0) - (w.__topMin || 0));
+      patchCardState(kind, { x: bb.x, y: idleY });
     }, 400);
   });
 
   w.on("closed", () => {
     setWin(kind, null);
-    if (!app.__quitting) markOpen(kind, false);   /* 用户手动关掉，下次别自动弹 */
+    if (app.__quitting) return;
+    /* 只有在"还有别的卡开着"时才算用户单独关掉这张。
+       关掉最后一张 = 整个应用要退出了（window-all-closed → quit），
+       这时如果也记成"关掉"，openCards 会丢掉卡片，下次启动就只剩天气卡。
+       不能立刻判断：两张卡一起关时，先关那张看到另一张还活着，就会误记。
+       所以等一拍 —— 应用真退出了这个定时器根本来不及跑，也就不会误记。 */
+    setTimeout(() => {
+      if (app.__quitting || w.isDestroyed()) return;
+      const alive = [weatherWin, todoWin].filter((x) => x && !x.isDestroyed()).length;
+      if (alive > 0) markOpen(kind, false);
+    }, 400);
   });
 
   markOpen(kind, true);
@@ -484,30 +497,35 @@ app.whenReady().then(() => {
   });
 
   /* 页面按内容报高度，主进程改窗口尺寸。
-     锚点：默认顶边不动、往下长；如果会长出屏幕底边，就改成底边不动、往上长。 */
+     页面报 { h, top, topMin }：h=卡片高度，top=待办区上沿距卡片顶的距离，
+     topMin=收起状态下的 top。y 用"条目在屏幕上不动"反推，所以悬停展开时
+     顶栏和输入条是从上面长出来的，鼠标底下的条目纹丝不动。 */
   ipcMain.handle("wgt:set-card-height", (e, want) => {
     const w = senderWin(e);
     if (!w || w.isDestroyed()) return false;
     const cfg = CARDS[kindOf(e)];
     if (!cfg.autoHeight) return false;
 
+    const msg = (want && typeof want === "object") ? want : { h: want, top: 0, topMin: 0 };
+    const top = Math.max(0, Math.round(Number(msg.top) || 0));
+    const topMin = Math.max(0, Math.round(Number(msg.topMin) || 0));
+
     const b = w.getBounds();
     const wa = screen.getDisplayMatching(b).workArea;
     const maxCard = Math.min(640, Math.round(wa.height * 0.72));
     const cardH = Math.round(
-      Math.min(Math.max(Number(want) || cfg.h, cfg.minH || cfg.h), maxCard)
+      Math.min(Math.max(Number(msg.h) || cfg.h, cfg.minH || cfg.h), maxCard)
     );
     const H = cardH + PAD * 2;
-    if (H === b.height) return true;
 
-    /* 锚点规则：
-       ① 用户摆的顶边往下放得下 → 顶边不动，向下长（缩回时也回得去）
-       ② 放不下 → 保持当前底边，向上长
-       用"锚 y"而不是"当前 y"，否则向上长过一次以后就再也回不到原位了。 */
-    const baseY = (w.__baseY != null) ? w.__baseY : b.y;
-    const bottomLimit = wa.y + wa.height - 8;
-    let y = (baseY + H <= bottomLimit) ? baseY : (b.y + b.height - H);
+    if (w.__rowsY == null) w.__rowsY = b.y + PAD + top;
+    w.__top = top;
+    w.__topMin = topMin;
+
+    let y = Math.round(w.__rowsY - PAD - top);
     y = Math.max(wa.y + 8, Math.min(y, wa.y + wa.height - H - 8));
+
+    if (H === b.height && y === b.y) return true;
 
     w.__autoY = y;      /* 记下这次是我们自己改的 y，moved 事件据此放行 */
     w.setBounds({ x: b.x, y: y, width: b.width, height: H }, false);
@@ -524,4 +542,4 @@ app.whenReady().then(() => {
 });
 
 app.on("before-quit", () => { app.__quitting = true; });
-app.on("window-all-closed", () => app.quit());
+app.on("window-all-closed", () => { app.__quitting = true; app.quit(); });

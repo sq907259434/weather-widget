@@ -24,6 +24,8 @@ contextBridge.exposeInMainWorld("wgt", {
   onFocusInput: (fn) => ipcRenderer.on("todo:focus-input", () => fn()),
   onClearDone: (fn) => ipcRenderer.on("todo:clear-done", () => fn()),
   onShowHistory: (fn) => ipcRenderer.on("todo:show-history", () => fn()),
-  /* 按内容高度改窗口（主进程会夹到合理区间并处理贴底情况） */
-  setCardHeight: (h) => ipcRenderer.invoke("wgt:set-card-height", h),
+  /* 按内容高度改窗口。传 {h, top, topMin}：
+     h=卡片高度，top=待办区上沿距卡片顶的距离，topMin=收起时的 top。
+     主进程靠 top 的变化反推窗口该往上挪多少，让条目在屏幕上不动。 */
+  setCardHeight: (msg) => ipcRenderer.invoke("wgt:set-card-height", msg),
 });
