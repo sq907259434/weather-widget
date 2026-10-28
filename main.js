@@ -42,6 +42,12 @@ const CARDS = {
     html: "todo.html",
     stateKey: "todo",
     title: "待办卡片",
+    /* 高度由页面自己报：条目多了往下长，少了缩回去。
+       minH 取空状态的自然高度（96 的空状态 + 3 行待办 ≈ 211），
+       这样 0~3 条之间窗口纹丝不动，不会加一条缩一下。
+       maxH 在运行时按屏幕工作区再算。 */
+    autoHeight: true,
+    minH: 211,
   },
 };
 
@@ -165,6 +171,10 @@ function createWindow(kind) {
 
   if (top) w.setAlwaysOnTop(true, "floating");
 
+  /* 用户亲手摆的顶边坐标。自动伸缩时以它为锚：
+     放得下就回这个位置，放不下才从当前底边往上长。 */
+  w.__baseY = y;
+
   /* 定位权限放行，拿不到会自动降级到网络定位（只有天气卡片用得到） */
   if (kind === "weather") {
     try {
@@ -181,11 +191,18 @@ function createWindow(kind) {
   /* 位置记忆（拖动会高频触发，做节流） */
   let moveTimer = null;
   w.on("moved", () => {
+    /* 自动长高/缩矮时我们会自己改 y（贴底时向上长），那不是用户拖的，别覆盖存档。
+       用"目标 y 精确比对"而不是时间窗：setBounds 触发的 moved 在 Windows 上
+       可能晚到，靠计时器复位容易漏判。 */
+    const b = w.getBounds();
+    if (w.__autoY != null && b.y === w.__autoY) return;
+    w.__autoY = null;
+    w.__baseY = b.y;      /* 用户亲手摆的位置，之后自动伸缩都以它为锚 */
     clearTimeout(moveTimer);
     moveTimer = setTimeout(() => {
       if (w.isDestroyed()) return;
-      const b = w.getBounds();
-      patchCardState(kind, { x: b.x, y: b.y });
+      const bb = w.getBounds();
+      patchCardState(kind, { x: bb.x, y: bb.y });
     }, 400);
   });
 
@@ -318,6 +335,7 @@ async function buildMenu(kind) {
   } else {
     items.push(
       { label: "添加待办", accelerator: "CmdOrCtrl+N", click: () => todoWin && todoWin.webContents.send("todo:focus-input") },
+      { label: "历史记录", click: () => todoWin && todoWin.webContents.send("todo:show-history") },
       { label: "清除已完成", click: () => todoWin && todoWin.webContents.send("todo:clear-done") },
     );
   }
@@ -463,6 +481,38 @@ app.whenReady().then(() => {
   ipcMain.handle("wgt:card-size", (e) => {
     const c = CARDS[kindOf(e)];
     return { w: c.w, h: c.h };
+  });
+
+  /* 页面按内容报高度，主进程改窗口尺寸。
+     锚点：默认顶边不动、往下长；如果会长出屏幕底边，就改成底边不动、往上长。 */
+  ipcMain.handle("wgt:set-card-height", (e, want) => {
+    const w = senderWin(e);
+    if (!w || w.isDestroyed()) return false;
+    const cfg = CARDS[kindOf(e)];
+    if (!cfg.autoHeight) return false;
+
+    const b = w.getBounds();
+    const wa = screen.getDisplayMatching(b).workArea;
+    const maxCard = Math.min(640, Math.round(wa.height * 0.72));
+    const cardH = Math.round(
+      Math.min(Math.max(Number(want) || cfg.h, cfg.minH || cfg.h), maxCard)
+    );
+    const H = cardH + PAD * 2;
+    if (H === b.height) return true;
+
+    /* 锚点规则：
+       ① 用户摆的顶边往下放得下 → 顶边不动，向下长（缩回时也回得去）
+       ② 放不下 → 保持当前底边，向上长
+       用"锚 y"而不是"当前 y"，否则向上长过一次以后就再也回不到原位了。 */
+    const baseY = (w.__baseY != null) ? w.__baseY : b.y;
+    const bottomLimit = wa.y + wa.height - 8;
+    let y = (baseY + H <= bottomLimit) ? baseY : (b.y + b.height - H);
+    y = Math.max(wa.y + 8, Math.min(y, wa.y + wa.height - H - 8));
+
+    w.__autoY = y;      /* 记下这次是我们自己改的 y，moved 事件据此放行 */
+    w.setBounds({ x: b.x, y: y, width: b.width, height: H }, false);
+    setTimeout(() => { if (!w.isDestroyed()) w.__autoY = null; }, 1500);
+    return true;
   });
 
   /* 页面里主动唤出另一张卡片（例如待办卡片上的按钮） */

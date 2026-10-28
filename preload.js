@@ -23,4 +23,7 @@ contextBridge.exposeInMainWorld("wgt", {
   /* 待办卡片用 */
   onFocusInput: (fn) => ipcRenderer.on("todo:focus-input", () => fn()),
   onClearDone: (fn) => ipcRenderer.on("todo:clear-done", () => fn()),
+  onShowHistory: (fn) => ipcRenderer.on("todo:show-history", () => fn()),
+  /* 按内容高度改窗口（主进程会夹到合理区间并处理贴底情况） */
+  setCardHeight: (h) => ipcRenderer.invoke("wgt:set-card-height", h),
 });

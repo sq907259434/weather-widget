@@ -11,6 +11,7 @@
     --ink-2:rgba(255,255,255,.72);
     --ink-3:rgba(255,255,255,.46);
     --danger:#ff5a5f;
+    --green:#3ecf6b;
   }
 
   *{ box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
@@ -86,6 +87,8 @@
   .act:hover{ background:rgba(255,255,255,.16); color:#fff; }
   .act:active{ transform:scale(.88); }
   .act svg{ width:13px; height:13px; }
+  /* 历史视图时按钮保持点亮，提示"正在看历史" */
+  .act.on{ background:rgba(255,255,255,.22); color:#fff; opacity:1; }
 
   /* ---------- 输入 ---------- */
   .add{
@@ -125,9 +128,12 @@
     margin:6px -4px 0;
     padding:0 4px;
     overflow-y:auto; overflow-x:hidden;
+    overflow-anchor:none;
     -webkit-app-region:drag;    /* 空白处仍可拖窗口，条目自己会 no-drag */
   }
   .list::-webkit-scrollbar{ width:0; }
+  /* 真正的行容器：窗口高度按它来算，所以不能再靠父级撑开 */
+  .rows{ display:block; padding-bottom:4px; }
 
   /* 每行：红色删除底（默认隐藏）+ 可滑动的条目 */
   .row{
@@ -159,12 +165,12 @@
     position:relative; z-index:2;
     height:30px;
     display:flex; align-items:center; gap:8px;
-    padding:0 9px 0 7px;
+    padding:0 6px 0 7px;
     border-radius:9px;
     background:rgba(255,255,255,.085);
     box-shadow:inset 0 0 0 1px rgba(255,255,255,.07);
     will-change:transform;
-    transition:transform .18s cubic-bezier(.2,.8,.3,1), background .15s ease, opacity .18s ease;
+    transition:transform .18s cubic-bezier(.2,.8,.3,1), background .15s ease, opacity .18s ease, box-shadow .15s ease;
   }
   .item:hover{ background:rgba(255,255,255,.115); }
   .item.dragging{ transition:none; }
@@ -180,7 +186,7 @@
     border:1.6px solid rgba(255,255,255,.45);
     border-radius:50%; background:transparent; cursor:pointer;
     display:grid; place-items:center;
-    transition:background .16s ease, border-color .16s ease, transform .12s ease;
+    transition:background .16s ease, border-color .16s ease, transform .12s ease, opacity .16s ease;
   }
   .chk:hover{ border-color:rgba(255,255,255,.8); background:rgba(255,255,255,.10); }
   .chk:active{ transform:scale(.88); }
@@ -188,8 +194,7 @@
     width:9px; height:9px; opacity:0;
     transform:scale(.5); transition:opacity .14s ease, transform .14s ease;
   }
-  .item.done .chk{ background:#3ecf6b; border-color:#3ecf6b; }
-  .item.done .chk svg{ opacity:1; transform:scale(1); }
+  .item.done .chk{ background:var(--green); border-color:var(--green); }
 
   /* 文字 */
   .txt{
@@ -199,30 +204,95 @@
     white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
     transition:color .16s ease, opacity .16s ease;
   }
+
+  /* 已勾掉：整条退到背景里 —— 划掉 + 颜色变浅 + 底色更淡 */
+  .item.done{
+    background:rgba(255,255,255,.035);
+    box-shadow:inset 0 0 0 1px rgba(255,255,255,.045);
+  }
+  .item.done:hover{ background:rgba(255,255,255,.07); }
+  .item.done .chk{ opacity:.75; }
+  .item.done .chk svg{ opacity:1; transform:scale(1); }
   .item.done .txt{
-    color:rgba(255,255,255,.42);
+    color:rgba(255,255,255,.32);
     text-decoration:line-through;
     text-decoration-thickness:1.5px;
-    text-decoration-color:rgba(255,255,255,.52);
+    text-decoration-color:rgba(255,255,255,.30);
   }
 
-  /* 右侧小把手，暗示可以往右滑 */
-  .grip{
-    flex:0 0 auto; width:10px; color:rgba(255,255,255,.22);
+  /* 悬停才出现的删除按钮（替代原来那个小箭头，顺手告诉用户"这里能删"） */
+  .del{
+    flex:0 0 auto; width:20px; height:20px; margin-right:-2px; padding:0;
+    border:0; border-radius:6px; cursor:pointer;
+    background:transparent; color:rgba(255,255,255,.5);
     display:grid; place-items:center;
-    opacity:0; transition:opacity .15s ease;
+    opacity:0; transition:opacity .14s ease, background .14s ease, color .14s ease;
   }
-  .item:hover .grip{ opacity:1; }
-  .grip svg{ width:10px; height:10px; }
+  .item:hover .del{ opacity:1; }
+  .del:hover{ background:rgba(255,80,86,.9); color:#fff; }
+  .del:active{ transform:scale(.9); }
+  .del svg{ width:12px; height:12px; }
 
   /* 空状态 */
   .empty{
-    height:100%;
+    /* 96 + 4(下方留白) 正好等于 3 行待办的高度，这样 0~3 条之间窗口高度恒定，
+       不会出现"加了一条反而缩了一下"的抖动。主进程 minH 也是按这个值定的。 */
+    height:96px;
     display:flex; flex-direction:column; align-items:center; justify-content:center;
     gap:6px; color:rgba(255,255,255,.36);
     font-size:11.5px; letter-spacing:.3px;
   }
   .empty svg{ width:26px; height:26px; opacity:.55; }
+
+  /* ---------- 历史视图 ---------- */
+  .hlbl{
+    font-size:10px; font-weight:600; letter-spacing:.5px;
+    color:rgba(255,255,255,.38);
+    padding:6px 7px 4px;
+    -webkit-app-region:no-drag;
+  }
+  .hlbl:first-child{ padding-top:1px; }
+  .hrow{
+    display:flex; align-items:center; gap:7px;
+    height:27px; padding:0 6px; margin-bottom:1px;
+    border-radius:8px;
+    -webkit-app-region:no-drag;
+    transition:background .14s ease;
+  }
+  .hrow:hover{ background:rgba(255,255,255,.09); }
+  .hrow .hi{
+    flex:0 0 auto; width:13px; display:grid; place-items:center;
+    color:rgba(255,255,255,.4);
+  }
+  .hrow .hi svg{ width:11px; height:11px; }
+  .hrow.ok .hi{ color:var(--green); }
+  .hrow.gone .hi{ color:rgba(255,107,112,.85); }
+  .hrow .htxt{
+    flex:1 1 auto; min-width:0;
+    font-size:12px; color:rgba(255,255,255,.74);
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  }
+  .hrow.gone .htxt{
+    color:rgba(255,255,255,.32);
+    text-decoration:line-through;
+    text-decoration-thickness:1.5px;
+    text-decoration-color:rgba(255,255,255,.5);
+  }
+  .hrow.gone .htm{ color:rgba(255,255,255,.22); }
+  .hrow .htm{
+    flex:0 0 auto; font-size:9.5px; letter-spacing:.3px;
+    color:rgba(255,255,255,.3);
+  }
+  .hrow .rest{
+    flex:0 0 auto; width:19px; height:19px; padding:0;
+    border:0; border-radius:5px; cursor:pointer;
+    background:transparent; color:rgba(255,255,255,.5);
+    display:grid; place-items:center;
+    opacity:0; transition:opacity .14s ease, background .14s ease, color .14s ease;
+  }
+  .hrow:hover .rest{ opacity:1; }
+  .rest:hover{ background:rgba(255,255,255,.2); color:#fff; }
+  .rest svg{ width:11px; height:11px; }
 
   /* ---------- 页脚 ---------- */
   .ft{
@@ -232,6 +302,8 @@
   }
   .ft .tip{ opacity:0; transition:opacity .2s ease; }
   body:hover .ft .tip{ opacity:1; }
+  .ft .link{ color:rgba(255,255,255,.55); cursor:pointer; opacity:1; -webkit-app-region:no-drag; }
+  .ft .link:hover{ color:#fff; text-decoration:underline; }
 </style>
 </head>
 <body>
@@ -239,9 +311,14 @@
 <div class="card" id="card">
   <div class="tint"></div>
 
-  <div class="hd">
+  <div class="hd" id="hd">
     <div class="ttl">待办<span class="cnt" id="cnt"></span></div>
     <div class="acts">
+      <button class="act" id="histBtn" title="历史记录">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 7.5v5l3.2 2"/><circle cx="12" cy="12" r="8.2"/>
+        </svg>
+      </button>
       <button class="act" id="menuBtn" title="更多（置顶 / 清除已完成 / 退出）">
         <svg viewBox="0 0 24 24" fill="currentColor" stroke="none">
           <circle cx="12" cy="5.2" r="1.9"/><circle cx="12" cy="12" r="1.9"/><circle cx="12" cy="18.8" r="1.9"/>
@@ -255,7 +332,7 @@
     </div>
   </div>
 
-  <div class="add">
+  <div class="add" id="addBar">
     <input id="inp" type="text" placeholder="写点什么，回车添加" autocomplete="off" spellcheck="false" maxlength="80">
     <button class="btn-add" id="addBtn" title="添加" disabled>
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round">
@@ -264,78 +341,177 @@
     </button>
   </div>
 
-  <div class="list" id="list"></div>
+  <div class="list" id="list"><div class="rows" id="rows"></div></div>
 
-  <div class="ft">
+  <div class="ft" id="ft">
     <span id="ftL">回车添加</span>
-    <span class="tip">按住往右滑删除</span>
+    <span class="tip" id="ftR">按住往右滑删除</span>
   </div>
 </div>
 
 <script>
 /* ================= 数据 ================= */
-const STORE = "todo_v1";
-const state = { items: [] };
+const STORE = "todo_v1";          /* 待办本身，沿用旧键，不破坏已有数据 */
+const HSTORE = "todo_hist_v1";    /* 历史记录，独立键 */
+const HIST_MAX = 120;             /* 最多留 120 条，再老的自然淘汰 */
+
+const state = { items: [], hist: [], view: "todo" };
 
 function load() {
   try {
-    const raw = localStorage.getItem(STORE);
-    const arr = raw ? JSON.parse(raw) : [];
+    const arr = JSON.parse(localStorage.getItem(STORE) || "[]");
     state.items = Array.isArray(arr) ? arr.filter((t) => t && typeof t.text === "string") : [];
-  } catch (e) {
-    state.items = [];
-  }
+  } catch (e) { state.items = []; }
+
+  try {
+    const h = JSON.parse(localStorage.getItem(HSTORE) || "[]");
+    state.hist = Array.isArray(h) ? h.filter((t) => t && typeof t.text === "string") : [];
+  } catch (e) { state.hist = []; }
 }
 
-function save() {
-  try { localStorage.setItem(STORE, JSON.stringify(state.items)); } catch (e) {}
-}
+const save = () => { try { localStorage.setItem(STORE, JSON.stringify(state.items)); } catch (e) {} };
+const saveHist = () => { try { localStorage.setItem(HSTORE, JSON.stringify(state.hist)); } catch (e) {} };
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({
   "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
 }[c]));
+const uid = () => Date.now() + "-" + Math.random().toString(36).slice(2, 7);
 
 /* ================= 图标 ================= */
-const ICON_CHECK = '<svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 12.5l5 5 10-11"/></svg>';
+const ICON_CHECK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 12.5l5 5 10-11"/></svg>';
 const ICON_TRASH = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9.5 7V4.8h5V7M6.5 7l.9 12.2a1.6 1.6 0 001.6 1.5h6a1.6 1.6 0 001.6-1.5L17.5 7"/></svg>';
-const ICON_GRIP = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M9 7l5 5-5 5"/></svg>';
+const ICON_BACK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9.5h10.5a5 5 0 010 10H8"/><path d="M7.5 5.5L4 9.5l3.5 4"/></svg>';
 const ICON_EMPTY = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4.5" width="16" height="15" rx="3"/><path d="M8.5 10h7M8.5 14h4.5"/></svg>';
+const ICON_EMPTY_H = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.2"/><path d="M12 7.5v5l3.2 2"/></svg>';
+
+/* ================= 历史：按天分组 ================= */
+const pad2 = (n) => String(n).padStart(2, "0");
+const dayOf = (ts) => {
+  const d = new Date(ts);
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+};
+function dayLabel(ts) {
+  const diff = Math.round((dayOf(Date.now()) - dayOf(ts)) / 86400000);
+  if (diff <= 0) return "今天";
+  if (diff === 1) return "昨天";
+  const d = new Date(ts);
+  return (d.getMonth() + 1) + "月" + d.getDate() + "日";
+}
+const hhmm = (ts) => { const d = new Date(ts); return pad2(d.getHours()) + ":" + pad2(d.getMinutes()); };
+
+function pushHist(text, kind) {
+  state.hist.unshift({ id: uid(), text: String(text), kind: kind, at: Date.now() });
+  if (state.hist.length > HIST_MAX) state.hist.length = HIST_MAX;
+  saveHist();
+}
 
 /* ================= 渲染 ================= */
-function render() {
-  const list = $("list");
+function renderList() {
+  const rows = $("rows");
   const items = state.items;
 
-  if (!items.length) {
-    list.innerHTML = '<div class="empty">' + ICON_EMPTY + '<div>还没有待办</div></div>';
-  } else {
-    let html = "";
-    items.forEach((t) => {
-      html += '<div class="row" data-id="' + t.id + '">' +
-        '<div class="hint">' + ICON_TRASH + '<span>松手删除</span></div>' +
-        '<div class="item' + (t.done ? " done" : "") + '" data-id="' + t.id + '">' +
-          '<button class="chk" data-act="toggle" title="' + (t.done ? "标记为未完成" : "标记为已完成") + '">' + ICON_CHECK + '</button>' +
-          '<span class="txt">' + esc(t.text) + '</span>' +
-          '<span class="grip">' + ICON_GRIP + '</span>' +
-        '</div></div>';
+  if (state.view === "hist") {
+    if (!state.hist.length) {
+      rows.innerHTML = '<div class="empty">' + ICON_EMPTY_H + '<div>还没有记录</div></div>';
+      return;
+    }
+    let html = "", last = "";
+    state.hist.forEach((h) => {
+      const lbl = dayLabel(h.at);
+      if (lbl !== last) { html += '<div class="hlbl">' + lbl + '</div>'; last = lbl; }
+      const gone = h.kind === "del";
+      html += '<div class="hrow ' + (gone ? "gone" : "ok") + '" data-hid="' + h.id + '">' +
+        '<span class="hi">' + (gone ? ICON_TRASH : ICON_CHECK) + '</span>' +
+        '<span class="htxt">' + esc(h.text) + '</span>' +
+        '<span class="htm">' + hhmm(h.at) + '</span>' +
+        '<button class="rest" data-act="restore" title="放回待办">' + ICON_BACK + '</button>' +
+      '</div>';
     });
-    list.innerHTML = html;
+    rows.innerHTML = html;
+    return;
   }
 
+  if (!items.length) {
+    rows.innerHTML = '<div class="empty">' + ICON_EMPTY + '<div>还没有待办</div></div>';
+    return;
+  }
+
+  let html = "";
+  items.forEach((t) => {
+    html += '<div class="row" data-id="' + t.id + '">' +
+      '<div class="hint">' + ICON_TRASH + '<span>松手删除</span></div>' +
+      '<div class="item' + (t.done ? " done" : "") + '" data-id="' + t.id + '">' +
+        '<button class="chk" data-act="toggle" title="' + (t.done ? "标记为未完成" : "标记为已完成") + '">' + ICON_CHECK + '</button>' +
+        '<span class="txt">' + esc(t.text) + '</span>' +
+        '<button class="del" data-act="del" title="删除">' + ICON_TRASH + '</button>' +
+      '</div></div>';
+  });
+  rows.innerHTML = html;
+}
+
+function renderMeta() {
+  const items = state.items;
   const done = items.filter((t) => t.done).length;
-  $("cnt").textContent = items.length ? done + "/" + items.length : "";
-  $("ftL").textContent = items.length
-    ? "共 " + items.length + " 项 · 已完成 " + done
-    : "回车添加";
-  $("addBtn").disabled = !$("inp").value.trim();
+  const hist = state.view === "hist";
+
+  $("histBtn").classList.toggle("on", hist);
+  $("cnt").textContent = hist
+    ? (state.hist.length ? state.hist.length + " 条记录" : "")
+    : (items.length ? done + "/" + items.length : "");
+
+  $("ftL").textContent = hist
+    ? (state.hist.length ? "共 " + state.hist.length + " 条记录" : "历史记录")
+    : (items.length ? "共 " + items.length + " 项 · 已完成 " + done : "回车添加");
+
+  const r = $("ftR");
+  if (hist) {
+    r.textContent = state.hist.length ? "清空历史" : "";
+    r.className = state.hist.length ? "link" : "tip";
+  } else {
+    r.textContent = "按住往右滑删除";
+    r.className = "tip";
+  }
+}
+
+function render() {
+  renderList();
+  renderMeta();
+  syncHeight();
+}
+
+/* ================= 窗口高度跟着内容走 =================
+   主进程收到的高度是"卡片本身"的高度，外层给投影留的透明边距由主进程自己加。 */
+const pxv = (el, p) => parseFloat(getComputedStyle(el)[p]) || 0;
+
+function contentHeight() {
+  const card = $("card"), add = $("addBar"), list = $("list");
+  return pxv(card, "paddingTop") + pxv(card, "paddingBottom")
+       + $("hd").offsetHeight
+       + add.offsetHeight + pxv(add, "marginTop") + pxv(add, "marginBottom")
+       + pxv(list, "marginTop") + pxv(list, "marginBottom")
+       + $("rows").offsetHeight
+       + $("ft").offsetHeight;
+}
+
+let hTimer = null, lastH = 0;
+function syncHeight() {
+  clearTimeout(hTimer);
+  /* 用定时器而不是 rAF：窗口被遮住时 rAF 会暂停，高度就再也不更新了 */
+  hTimer = setTimeout(() => {
+    const h = Math.round(contentHeight());
+    if (Math.abs(h - lastH) < 2) return;
+    lastH = h;
+    if (window.wgt && window.wgt.setCardHeight) window.wgt.setCardHeight(h);
+  }, 30);
 }
 
 /* ================= 增删改 ================= */
 function add(text) {
   const t = String(text || "").trim();
   if (!t) return false;
-  state.items.push({ id: Date.now() + "-" + Math.random().toString(36).slice(2, 7), text: t, done: false, at: Date.now() });
+  state.items.push({ id: uid(), text: t, done: false, at: Date.now() });
+  if (state.view === "hist") state.view = "todo";   /* 在历史里添加，自动切回待办 */
   save();
   render();
   return true;
@@ -345,6 +521,7 @@ function toggle(id) {
   const t = state.items.find((x) => x.id === id);
   if (!t) return;
   t.done = !t.done;    /* 只改状态，不挪位置 —— 用户要求原地不动 */
+  if (t.done) pushHist(t.text, "done");
   save();
   render();
 }
@@ -352,15 +529,39 @@ function toggle(id) {
 function remove(id) {
   const i = state.items.findIndex((x) => x.id === id);
   if (i < 0) return;
-  state.items.splice(i, 1);
+  const [t] = state.items.splice(i, 1);
+  pushHist(t.text, "del");
   save();
   render();
 }
 
 function clearDone() {
   const before = state.items.length;
+  state.items.filter((t) => t.done).forEach((t) => pushHist(t.text, "del"));
   state.items = state.items.filter((t) => !t.done);
   if (state.items.length !== before) { save(); render(); }
+}
+
+/* 从历史里把一条放回待办（一律回到"未完成"，免得又被自动清掉） */
+function restore(hid) {
+  const i = state.hist.findIndex((x) => x.id === hid);
+  if (i < 0) return;
+  const [h] = state.hist.splice(i, 1);
+  state.items.push({ id: uid(), text: h.text, done: false, at: Date.now() });
+  save(); saveHist(); render();
+}
+
+function clearHist() {
+  if (!state.hist.length) return;
+  state.hist = [];
+  saveHist(); render();
+}
+
+function setView(v) {
+  if (state.view === v) return;
+  state.view = v;
+  $("list").scrollTop = 0;
+  render();
 }
 
 /* ================= 交互：添加 ================= */
@@ -384,7 +585,7 @@ $("addBtn").addEventListener("click", () => {
   inp.focus();
 });
 
-/* ================= 交互：点击完成 / 右滑删除 ================= */
+/* ================= 交互：完成 / 删除 / 右滑删除 ================= */
 const list = $("list");
 let drag = null;            /* { item, row, id, startX, dx, moved } */
 let suppressClick = false;  /* 刚滑完，紧接着的 click 要吞掉，别误标完成 */
@@ -393,11 +594,12 @@ const THRESHOLD = 82;   /* 滑过这个距离就删（约 1/3 卡宽） */
 
 list.addEventListener("mousedown", (e) => {
   if (e.button !== 0) return;
+  if (state.view !== "todo") return;
   const item = e.target.closest(".item");
   if (!item) return;
 
-  /* 点在勾选圈上：走 click，不启动滑动手势 */
-  if (e.target.closest(".chk")) return;
+  /* 点在勾选圈或垃圾桶上：走 click，不启动滑动手势 */
+  if (e.target.closest(".chk") || e.target.closest(".del")) return;
 
   drag = {
     item: item,
@@ -458,14 +660,37 @@ window.addEventListener("mouseup", () => {
 
 list.addEventListener("click", (e) => {
   if (suppressClick) { e.stopPropagation(); e.preventDefault(); return; }
-  const chk = e.target.closest(".chk");
-  if (chk) {
-    const item = chk.closest(".item");
-    if (item) toggle(item.dataset.id);
+
+  if (state.view === "todo") {
+    const chk = e.target.closest(".chk");
+    if (chk) {
+      const item = chk.closest(".item");
+      if (item) toggle(item.dataset.id);
+      return;
+    }
+    const del = e.target.closest(".del");
+    if (del) {
+      const item = del.closest(".item");
+      if (item) {
+        item.classList.add("removing");
+        setTimeout(() => remove(item.dataset.id), 190);
+      }
+    }
+    return;
+  }
+
+  const rest = e.target.closest(".rest");
+  if (rest) {
+    const row = rest.closest(".hrow");
+    if (row) restore(row.dataset.hid);
   }
 }, true);
 
-/* ================= 菜单 / 关闭 ================= */
+/* ================= 视图切换 / 页脚 / 菜单 / 关闭 ================= */
+$("histBtn").addEventListener("click", () => setView(state.view === "hist" ? "todo" : "hist"));
+
+$("ftR").addEventListener("click", () => { if (state.view === "hist") clearHist(); });
+
 $("menuBtn").addEventListener("click", () => { if (window.wgt) window.wgt.menu(); });
 $("closeBtn").addEventListener("click", () => { if (window.wgt) window.wgt.close(); else window.close(); });
 
@@ -477,14 +702,18 @@ document.addEventListener("contextmenu", (e) => {
 });
 
 if (window.wgt) {
-  window.wgt.onFocusInput(() => { inp.focus(); inp.select(); });
+  window.wgt.onFocusInput(() => { if (state.view === "hist") setView("todo"); inp.focus(); inp.select(); });
   window.wgt.onClearDone(() => clearDone());
+  if (window.wgt.onShowHistory) window.wgt.onShowHistory(() => setView(state.view === "hist" ? "todo" : "hist"));
 }
 
 /* ================= 启动 ================= */
 document.body.classList.add(window.wgt && window.wgt.acrylic ? "acrylic" : "solid");
 load();
 render();
+
+/* 字体加载完高度会变一点，再校一次 */
+if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { lastH = 0; syncHeight(); });
 </script>
 </body>
 </html>
