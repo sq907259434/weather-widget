@@ -1038,16 +1038,19 @@ const PYCITY = [
   ["香港","xiang gang"],["澳门","ao men"],["台北","tai bei"],["高雄","gao xiong"],["台中","tai zhong"],["台南","tai nan"]
 ];
 let PYIDX = null;
+/* 大城市优先：直辖市+省会+热门旅游城市，首字母歧义时（如 wh=武汉/威海）排前面 */
+const PYMAJOR = "北京 上海 天津 重庆 广州 深圳 成都 杭州 武汉 西安 南京 苏州 青岛 长沙 郑州 沈阳 哈尔滨 昆明 大连 厦门 三亚 桂林 丽江 贵阳 兰州 乌鲁木齐 香港 澳门 台北";
 function pyIndex() {
   if (!PYIDX) {
+    const major = PYMAJOR.split(" ");
     PYIDX = PYCITY.map(function (it) {
       const s = it[1].split(" ");
-      return { n: it[0], py: s.join(""), ab: s.map(function (x) { return x[0]; }).join("") };
+      return { n: it[0], py: s.join(""), ab: s.map(function (x) { return x[0]; }).join(""), mj: major.indexOf(it[0]) >= 0 ? 0 : 1 };
     });
   }
   return PYIDX;
 }
-/* 纯字母查询 → 候选中文城市名（最多 4 个）。精确命中排前面。 */
+/* 纯字母查询 → 候选中文城市名（最多 4 个）。精确命中→大城市→普通，依次排前。 */
 function expandQuery(q) {
   const hits = pyIndex().filter(function (c) {
     return c.ab === q || c.py === q ||
@@ -1055,7 +1058,7 @@ function expandQuery(q) {
       (q.length >= 2 && c.ab.indexOf(q) === 0);
   });
   hits.sort(function (a, b) {
-    return (b.ab === q) - (a.ab === q) || (b.py === q) - (a.py === q);
+    return (b.ab === q) - (a.ab === q) || (b.py === q) - (a.py === q) || a.mj - b.mj;
   });
   return hits.slice(0, 4).map(function (c) { return c.n; });
 }
@@ -1067,20 +1070,28 @@ function geoURL(name) {
 async function searchCities(q) {
   const isAscii = /^[a-z]+$/i.test(q.trim());
   const direct = fetchJSON(geoURL(q), 8000).then((d) => d.results || []).catch(() => []);
-  /* 字母查询时并行做本地展开（km → 昆明）；中文/混合查询不需要 */
+  /* 字母查询时并行做本地展开（km → 昆明）；中文/混合查询不需要。
+     每个候选城市同时查「XX市」和「XX」——API 的中文匹配常常只认带「市」的全称
+     （搜「长沙」只回乡镇，搜「长沙市」才回长沙市），市的结果排前面。 */
   let extra = Promise.resolve([]);
   if (isAscii && q.trim().length <= 6) {
     const names = expandQuery(q.trim().toLowerCase());
     if (names.length) {
       extra = Promise.all(names.map((n) =>
-        fetchJSON(geoURL(n), 8000).then((d) => d.results || []).catch(() => [])
+        Promise.all([
+          fetchJSON(geoURL(n + "市"), 8000).then((d) => d.results || []).catch(() => []),
+          fetchJSON(geoURL(n), 8000).then((d) => d.results || []).catch(() => []),
+        ]).then((pair) => pair[0].concat(pair[1]))
       )).then((arrs) => arrs.flat());
     }
   }
   const [a, b] = await Promise.all([direct, extra]);
+  /* 字母短查询时，展开结果（用户真实意图）排前面，直接查询的杂音结果垫底 */
+  const ordered = (isAscii && q.trim().length <= 6 && b.length) ? b.concat(a) : a.concat(b);
   const seen = new Set(); const out = [];
-  for (const r of a.concat(b)) {
-    const k = r.name + "|" + r.latitude + "," + r.longitude;
+  for (const r of ordered) {
+    /* 坐标取 1 位小数做去重键：直接查询与展开查询返回的坐标常有微小差异 */
+    const k = r.name + "|" + Number(r.latitude).toFixed(1) + "," + Number(r.longitude).toFixed(1);
     if (!seen.has(k)) { seen.add(k); out.push(r); }
     if (out.length >= 8) break;
   }
