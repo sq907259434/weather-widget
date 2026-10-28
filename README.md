@@ -190,6 +190,8 @@ npx electron-builder --win nsis portable --prepackaged dist/win-unpacked
 
 CI（GitHub Actions 的 Windows runner）通常自带该权限，`npm run dist` 可以直接跑通。
 
+**关于自动打包**：`tools/github-actions-build.yml` 是现成的 GitHub Actions 工作流（推 `v*` 标签即自动出安装版 + 绿色版并发布 Release），但**目前没有启用**。原因是 GitHub 对 `.github/workflows/` 下的文件有额外权限要求 —— 推送这类文件时 token 必须带 `workflow` scope，否则会被直接拒绝。想启用，按该文件开头的说明做（网页上新建最省事，不受 scope 限制）。
+
 国内网络构建建议设镜像，否则 115MB 的 Electron 运行时会卡很久：
 
 ```bash
@@ -207,7 +209,9 @@ weather-widget/
 ├── widget.html        # 天气卡：全部界面与逻辑（单文件，无框架、无构建步骤）
 ├── todo.html          # 待办卡：同上，含右滑删除手势
 ├── icon.png / icon.ico
-└── tools/make-icon.py # 多尺寸 ico 生成
+└── tools/
+    ├── make-icon.py                # 多尺寸 ico 生成
+    └── github-actions-build.yml    # 备用 CI（未启用，见上文说明）
 ```
 
 ## 已知限制
@@ -219,7 +223,7 @@ weather-widget/
 - **挂代理 / VPN 时定位可能跑到境外**：IP 归属查的是出口 IP，时区对不上会在卡片右下角标「网络定位·可能不准」，点城市名可手动指定。主进程用 Node 直连查询、不走系统代理，能减少但不能完全消除误判
 - 待办数据存在 `localStorage`，卸载时若勾选了删除应用数据会一并清空，建议重要事项别只记在这
 - 待办卡片高度上限是屏幕可用高度的 72%，超过之后在卡片内部滚动（不无限长高，以免盖住整个桌面）
-- **浅色壁纸下待办框会偏弱**：收起态的任务框是半透明白叠加，桌面很亮时白字的对比度会下降。常用浅色壁纸的话，把 `todo.html` 里 `.card:not(.full) .item` 的背景改成深色半透明（例如 `rgba(30,38,58,.62)`）就稳了
+- **浅色壁纸下的可读性**：任务框/输入框自带深色玻璃底（`rgba(16,22,36,.55)` + 1px 亮边），白底前也能读。若整块桌面极亮且仍觉得偏弱，把 `todo.html` 里 `.item` / `.add input` 的背景透明度往上调（例如 `.72`）即可
 
 ## 数据来源
 
