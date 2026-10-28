@@ -34,8 +34,8 @@
 
 | 文件 | 说明 |
 | --- | --- |
-| `WeatherWidget-1.9.0-x64-setup.exe` | 安装版。可选安装目录，自动创建快捷方式 |
-| `WeatherWidget-1.9.0-x64-portable.exe` | 绿色版。双击即用，不写注册表（除自启动选项） |
+| `WeatherWidget-1.9.1-x64-setup.exe` | 安装版。可选安装目录，自动创建快捷方式 |
+| `WeatherWidget-1.9.1-x64-portable.exe` | 绿色版。双击即用，不写注册表（除自启动选项） |
 
 > 未做代码签名，Windows SmartScreen 可能提示"未知发布者"，点「更多信息 → 仍要运行」即可。
 

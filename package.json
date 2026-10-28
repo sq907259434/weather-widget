@@ -1,6 +1,6 @@
 {
   "name": "weather-widget",
-  "version": "1.9.0",
+  "version": "1.9.1",
   "description": "A frosted-glass weather widget for the Windows desktop (Electron)",
   "author": {
     "name": "WeatherWidget Contributors"

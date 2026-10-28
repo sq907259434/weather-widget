@@ -629,7 +629,14 @@ app.whenReady().then(() => {
     if (!w || w.isDestroyed() || !w.__dragFrom) return;
     w.__midDragAt = Date.now();     /* 告诉 move 监听：这是页面发起的，别插手外观 */
     const f = w.__dragFrom;
-    w.setPosition(Math.round(f.x + (Number(dx) || 0)), Math.round(f.y + (Number(dy) || 0)));
+    const nx = Math.round(f.x + (Number(dx) || 0));
+    const ny = Math.round(f.y + (Number(dy) || 0));
+    w.setPosition(nx, ny);
+    /* 中键拖动是页面算位移、主进程 setPosition —— Windows 上这条路径不会触发
+       moved 事件，所以位置锚点必须在每一次挪动里同步更新。不然松手后鼠标一移开、
+       卡片收起，set-card-height 会用旧锚点反推 y，把窗口拉回拖动前的位置
+       （就是用户报的"松手又弹回原位"）。 */
+    w.__rowsY = ny + w.__pad + (w.__top || 0);
     /* 兜底：鼠标冲出窗口后页面可能再也收不到事件，别让窗口一直黏着鼠标 */
     clearTimeout(w.__dragTimer);
     w.__dragTimer = setTimeout(() => { if (!w.isDestroyed()) w.__dragFrom = null; }, 1200);
@@ -640,6 +647,11 @@ app.whenReady().then(() => {
     if (!w || w.isDestroyed()) return;
     clearTimeout(w.__dragTimer);
     w.__dragFrom = null;
+    /* 位置在这里落盘，不能等 moved —— 中键拖动根本不会来 moved，等的话位置就
+       永远记不住（下次启动回到旧位置）。存"收起态"的顶边：y + top - topMin。 */
+    const b = w.getBounds();
+    const idleY = Math.round(b.y + (w.__top || 0) - (w.__topMin || 0));
+    patchCardState(kindOf(e), { x: b.x, y: idleY });
   });
 
   ipcMain.handle("wgt:geo-ip", async () => {
