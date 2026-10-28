@@ -304,6 +304,30 @@
   body:hover .ft .tip{ opacity:1; }
   .ft .link{ color:rgba(255,255,255,.55); cursor:pointer; opacity:1; -webkit-app-region:no-drag; }
   .ft .link:hover{ color:#fff; text-decoration:underline; }
+
+  /* ---------- 平时只留待办条目，鼠标进来才显形 ----------
+     只动 opacity，绝不动 height/margin/padding：
+     一改布局，内容高度就变 → 主进程 setBounds 跟着改 → 鼠标底下会跳。
+     顶栏 22px、页脚 14px 的位置一直占着，隐藏时就是留白。 */
+  .hd, .ft{
+    opacity:0;
+    transition:opacity .16s ease, transform .16s ease;
+  }
+  .hd{ transform:translateY(-2px); }
+  .ft{ transform:translateY(2px); }
+
+  /* 隐藏时不可点：否则会点到看不见的 ✕ / ⋯ / "清空历史" */
+  .acts, .ft{ pointer-events:none; }
+
+  .card:hover .hd, .card:hover .ft,
+  .card:focus-within .hd, .card:focus-within .ft{
+    opacity:1; transform:none;
+  }
+  .card:hover .acts, .card:focus-within .acts,
+  .card:hover .ft, .card:focus-within .ft{ pointer-events:auto; }
+
+  /* 输入条不参与隐藏：它的 32px 高度是占位的，藏了只会多出一块空洞，
+     而收起来会让内容高度变 → 窗口跟着变高变矮。 */
 </style>
 </head>
 <body>
