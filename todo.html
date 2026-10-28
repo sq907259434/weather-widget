@@ -423,6 +423,42 @@
   .card.full .hd{ animation:reveal .16s ease both; }
   .card.full .add{ animation:reveal .14s ease both; }
   .card.full .ft{ animation:reveal .18s ease both; }
+
+  /* ---------- 拖动中：把"皮肤"抽掉，只剩任务框 ----------
+     挪窗口的时候最想知道的是"这几个框摆在哪、跟别的窗口齐不齐"，展开态那块
+     卡片底会把周围盖住，反而看不准。所以拖动期间整张卡退回收起态的样子。
+
+     只撤皮肤、不动布局：顶栏/输入条/页脚用 opacity 淡出，不用 display:none ——
+     一 display:none 条目就整体上移，鼠标底下那行会跳，对齐也就没法看了。
+     窗口高度也不改：拖动中改高度会让系统重算拖动锚点，窗口会突然跳一下。 */
+  body.dragging .card{
+    background-image:none !important;
+    background-color:transparent !important;
+    box-shadow:none !important;
+  }
+  body.dragging .card .tint,
+  body.dragging .card::after{ display:none; }
+
+  .card .hd, .card .add, .card .ft{ transition:opacity .13s ease; }
+  body.dragging .card .hd,
+  body.dragging .card .add,
+  body.dragging .card .ft{
+    opacity:0 !important;
+    animation:none !important;   /* .full 的 reveal 动画带 both，会压住 opacity */
+    pointer-events:none;
+  }
+  /* 没有卡片底垫着，条目自己就是唯一那块玻璃：跟收起态对齐 */
+  body.dragging .card .item{
+    background:rgba(16,22,36,.56);
+    box-shadow:inset 0 0 0 1px rgba(255,255,255,.15);
+  }
+  body.dragging .card .item.done{
+    background:rgba(16,22,36,.34);
+    box-shadow:inset 0 0 0 1px rgba(255,255,255,.08);
+  }
+  /* 拖动时不要"悬停变色"，不然鼠标划过哪条哪条亮，像在选中 */
+  body.dragging .card .item:hover{ background:rgba(16,22,36,.56); }
+  body.dragging .card .item.done:hover{ background:rgba(16,22,36,.34); }
 </style>
 </head>
 <body>
@@ -796,6 +832,88 @@ cardEl.addEventListener("focusout", (e) => {
   typing = false;
   if (applyFull()) syncHeight(true);
 });
+
+/* ================= 拖动中：只剩任务框 =================
+   两路拖动共用一套外观：
+     · 左键抓顶栏 —— 系统原生 caption 拖动（能吃到 Aero Snap 分屏），
+       开始/结束由主进程的 will-move / move 事件告诉我们；
+     · 中键按住 —— 页面自己算位移，主进程照着挪（顶栏只有 22px，中键够不着）。
+   外观只撤皮肤不撤布局，理由写在上面对应的 CSS 注释里。 */
+let lookNative = false, lookMid = false;
+
+function renderLook() {
+  document.body.classList.toggle("dragging", lookNative || lookMid);
+}
+
+function setNativeLook(on) {
+  if (lookNative === !!on) return;
+  lookNative = !!on;
+  renderLook();
+}
+
+/* 中键拖动：按住不放就能走，不用先停一下。
+   位移一律用屏幕坐标 —— 窗口一动 client 坐标立刻失真，屏幕坐标不会。 */
+let midDrag = null, midTimer = null;
+
+function endMidDrag() {
+  clearTimeout(midTimer);
+  if (!midDrag) return;
+  midDrag = null;
+  lookMid = false;
+  renderLook();
+  if (window.wgt && window.wgt.dragEnd) window.wgt.dragEnd();
+}
+
+function pokeMidDrag() {
+  clearTimeout(midTimer);
+  /* 兜底：鼠标冲出窗口后页面可能再也收不到事件，别让窗口黏着鼠标 */
+  midTimer = setTimeout(endMidDrag, 700);
+}
+
+window.addEventListener("mousedown", (e) => {
+  if (e.button !== 1) return;                     /* 只认中键 */
+  /* 正在输入的那个框里，中键还是留给系统（Windows 上是"粘贴"）。
+     但没聚焦时不抢 —— 一条待办都没有的时候整张卡就只有这个输入框，
+     要是也不让按，空列表就没地方下手拖了。 */
+  const box = e.target.closest("input, textarea, .etxt");
+  if (box && document.activeElement === box) return;
+  if (midDrag) return;
+
+  /* 挡掉 Windows 的自动滚动圆圈（中键按下的默认动作） */
+  e.preventDefault();
+  midDrag = { sx: e.screenX, sy: e.screenY };
+  lookMid = true;
+  renderLook();
+  if (window.wgt && window.wgt.dragBegin) window.wgt.dragBegin();
+  pokeMidDrag();
+}, true);
+
+window.addEventListener("mousemove", (e) => {
+  if (!midDrag) return;
+  /* 松手落在窗口外面时，页面收不到 mouseup，只能靠"按键已经没了"判断 */
+  if (e.buttons === 0) { endMidDrag(); return; }
+  pokeMidDrag();
+  if (window.wgt && window.wgt.dragMove) {
+    window.wgt.dragMove(e.screenX - midDrag.sx, e.screenY - midDrag.sy);
+  }
+});
+
+window.addEventListener("mouseup", (e) => {
+  if (e.button === 1) endMidDrag();
+});
+
+/* 中键按下后浏览器还会补一个 auxclick，别让它触发自动滚动 */
+window.addEventListener("auxclick", (e) => {
+  if (e.button === 1) e.preventDefault();
+});
+
+/* 窗口被夺焦点 / 切走时收尾，免得透明外观卡住不还原 */
+window.addEventListener("blur", () => { endMidDrag(); setNativeLook(false); });
+
+/* 主进程那一路：原生 caption 拖动开始 / 停下 */
+if (window.wgt && window.wgt.onDragLook) {
+  window.wgt.onDragLook((p) => { setNativeLook(!!(p && p.on)); });
+}
 
 /* ================= 增删改 ================= */
 function add(text) {

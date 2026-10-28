@@ -230,6 +230,57 @@ function createWindow(kind) {
   /* 待办卡的收放要看"光标到底还在不在窗口里"，这件事只有系统知道 */
   if (kind === "todo") watchCursor(w);
 
+  /* ---------- 拖动中：把卡片退成"只剩任务框" ----------
+     左键抓顶栏是系统原生 caption 拖动（吃得到 Aero Snap 分屏），这个动作浏览器
+     侧完全看不到事件，只有主进程能感知：will-move 在窗口被挪之前来，move 在挪的
+     过程中持续来。两条都用，谁先到谁开灯，之后谁在动谁续命，停手 260ms 关灯。
+
+     难点是"自己挪"和"用户挪"走的是同一条路：展开/收起时我们自己会 setBounds，
+     那也会触发 move。不挡掉的话，鼠标一悬停就整张卡透明一下。两把闸：
+       · 自己伸缩 —— 目标 y 就是刚记下的 __autoY；
+       · 页面发起的中键拖动 —— wgt:drag-move 会自己打时间戳，那 300ms 内不算。 */
+  w.__lookOn = false;
+  let lookTimer = null;
+  let motion = [];            /* 最近 260ms 内的移动事件时间戳 */
+  const setLook = (on) => {
+    if (w.__lookOn === on) return;
+    w.__lookOn = on;
+    if (!w.webContents || w.webContents.isDestroyed()) return;
+    try { w.webContents.send("wgt:drag-look", { on }); } catch (e) {}
+  };
+  const selfMove = () => {
+    if (w.__autoY == null) return false;
+    return Math.abs(w.getBounds().y - w.__autoY) <= 1;
+  };
+  /* 只有"连续在动"才算用户拖动。
+     松手之后系统还会补一两个落位事件（窗口把最后一点位移结算掉），
+     单看一个事件就开灯的话，卡片会在松手后又闪一下透明 —— 见过，很难看。
+     所以要求 260ms 内至少两跳，孤零零的一跳不理它。 */
+  const onMotion = () => {
+    const now = Date.now();
+    motion.push(now);
+    while (motion.length && now - motion[0] > 260) motion.shift();
+    if (motion.length < 2) return;
+    if (!w.__lookOn) setLook(true);
+    clearTimeout(lookTimer);
+    lookTimer = setTimeout(() => { motion = []; setLook(false); }, 320);
+  };
+  w.on("will-move", (_e, nb) => {
+    if (w.__autoY != null && Math.round(nb.y) === w.__autoY) return;
+    if (Date.now() - (w.__midDragAt || 0) < 300) return;
+    /* 只改 z 序（hover 抬升的 moveTop）也可能走到这里，
+       但那种情况下 x/y 根本没变 —— 不是挪窗口 */
+    const b = w.getBounds();
+    if (Math.round(nb.x) === b.x && Math.round(nb.y) === b.y) return;
+    onMotion();
+  });
+  w.on("move", () => {
+    if (selfMove()) return;
+    if (Date.now() - (w.__midDragAt || 0) < 300) return;
+    onMotion();
+  });
+  w.on("closed", () => clearTimeout(lookTimer));
+
   /* 位置记忆（拖动会高频触发，做节流） */
   let moveTimer = null;
   w.on("moved", () => {
@@ -564,8 +615,32 @@ app.whenReady().then(() => {
     w.setAlwaysOnTop(readCardState(kindOf(e)).top === true, "floating");
   });
 
-  /* 拖窗由页面自己处理：顶栏就是标题栏（-webkit-app-region: drag），
-     按住顶栏拖是系统原生行为，不需要主进程插手。 */
+  /* 左键抓顶栏是系统原生 caption 拖动，主进程不插手；但中键够不着那条 22px
+     的标题栏（drag region 不派发 DOM 事件给中键），所以中键这条路改由页面算
+     位移、主进程照着挪。屏幕坐标起步，窗口一动 client 坐标就失真。 */
+  ipcMain.on("wgt:drag-begin", (e) => {
+    const w = senderWin(e);
+    if (!w || w.isDestroyed()) return;
+    w.__dragFrom = w.getBounds();
+  });
+
+  ipcMain.on("wgt:drag-move", (e, dx, dy) => {
+    const w = senderWin(e);
+    if (!w || w.isDestroyed() || !w.__dragFrom) return;
+    w.__midDragAt = Date.now();     /* 告诉 move 监听：这是页面发起的，别插手外观 */
+    const f = w.__dragFrom;
+    w.setPosition(Math.round(f.x + (Number(dx) || 0)), Math.round(f.y + (Number(dy) || 0)));
+    /* 兜底：鼠标冲出窗口后页面可能再也收不到事件，别让窗口一直黏着鼠标 */
+    clearTimeout(w.__dragTimer);
+    w.__dragTimer = setTimeout(() => { if (!w.isDestroyed()) w.__dragFrom = null; }, 1200);
+  });
+
+  ipcMain.on("wgt:drag-end", (e) => {
+    const w = senderWin(e);
+    if (!w || w.isDestroyed()) return;
+    clearTimeout(w.__dragTimer);
+    w.__dragFrom = null;
+  });
 
   ipcMain.handle("wgt:geo-ip", async () => {
     try {

@@ -19,6 +19,14 @@ contextBridge.exposeInMainWorld("wgt", {
   /* 系统光标是否还在窗口矩形内（主进程按 90ms 轮询，只在变化时推）。
      页面自己的 mouseleave 在窗口重排时会误报，收起这件事以这条为准。 */
   onCursor: (fn) => ipcRenderer.on("wgt:cursor", (_e, p) => fn(p || {})),
+  /* 原生 caption 拖动开始 / 停下（主进程按 will-move / move 判），
+     页面据此把卡片退成"只剩任务框"的样子，方便看对齐 */
+  onDragLook: (fn) => ipcRenderer.on("wgt:drag-look", (_e, p) => fn(p || {})),
+  /* 中键拖动：顶栏只有 22px 高，中键够不着原生拖动区，
+     改成页面按屏幕坐标算位移，由主进程照着挪窗口 */
+  dragBegin: () => ipcRenderer.send("wgt:drag-begin"),
+  dragMove: (dx, dy) => ipcRenderer.send("wgt:drag-move", dx, dy),
+  dragEnd: () => ipcRenderer.send("wgt:drag-end"),
   /* 走主进程查 IP 归属：绕开系统代理，避免定位到代理出口所在的国家 */
   geoIP: () => ipcRenderer.invoke("wgt:geo-ip"),
   /* 唤出另一张卡片（天气 ↔ 待办） */
