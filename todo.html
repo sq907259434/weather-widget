@@ -161,18 +161,21 @@
   .row .hint svg{ width:13px; height:13px; }
   .row.armed .hint{ opacity:1; }
 
+  /* v1.7.0：条目自带一层"深色玻璃"。
+     卡片本身没有背景、窗口是透明的，白字如果没有衬底，铺在白色窗口（行情软件、
+     文档）前面就整块消失 —— 用户就是这么以为"没加上"的。深底 + 白字在深浅壁纸下都读得出来。 */
   .item{
     position:relative; z-index:2;
     height:30px;
     display:flex; align-items:center; gap:8px;
     padding:0 6px 0 7px;
     border-radius:9px;
-    background:rgba(255,255,255,.085);
-    box-shadow:inset 0 0 0 1px rgba(255,255,255,.07);
+    background:rgba(16,22,36,.52);
+    box-shadow:inset 0 0 0 1px rgba(255,255,255,.13);
     will-change:transform;
     transition:transform .18s cubic-bezier(.2,.8,.3,1), background .15s ease, opacity .18s ease, box-shadow .15s ease;
   }
-  .item:hover{ background:rgba(255,255,255,.115); }
+  .item:hover{ background:rgba(16,22,36,.64); }
   .item.dragging{ transition:none; }
   .item.removing{
     transform:translateX(110%);
@@ -205,12 +208,24 @@
     transition:color .16s ease, opacity .16s ease;
   }
 
+  /* 双击后换成的编辑框：和 .txt 同字号，看起来"就地变成可改的字" */
+  .etxt{
+    flex:1 1 auto; min-width:0;
+    height:22px; margin:-3px 0; padding:0 6px;
+    border:0; border-radius:6px;
+    background:rgba(12,17,30,.55);
+    box-shadow:inset 0 0 0 1px rgba(255,255,255,.42);
+    color:#fff; font:inherit; font-size:12.5px; letter-spacing:.2px;
+    outline:none; -webkit-app-region:no-drag;
+  }
+  .etxt::selection{ background:rgba(90,150,255,.55); }
+
   /* 已勾掉：整条退到背景里 —— 划掉 + 颜色变浅 + 底色更淡 */
   .item.done{
-    background:rgba(255,255,255,.035);
-    box-shadow:inset 0 0 0 1px rgba(255,255,255,.045);
+    background:rgba(16,22,36,.32);
+    box-shadow:inset 0 0 0 1px rgba(255,255,255,.08);
   }
-  .item.done:hover{ background:rgba(255,255,255,.07); }
+  .item.done:hover{ background:rgba(16,22,36,.44); }
   .item.done .chk{ opacity:.75; }
   .item.done .chk svg{ opacity:1; transform:scale(1); }
   .item.done .txt{
@@ -261,32 +276,34 @@
     order:1; flex:0 0 auto;
     position:relative; z-index:3;
     font-size:14px; font-weight:600; letter-spacing:.2px;
+    /* 标题没有自己的框，只能靠投影从浅色背景里"立"出来（白底窗口前尤其需要） */
+    text-shadow:0 1px 2px rgba(0,0,0,.85), 0 0 10px rgba(0,0,0,.45);
   }
   .card.solo .ttl .cnt{ display:none; }      /* 0 条，统计没意义 */
   .card.solo .add input{
     order:2; flex:1 1 auto; min-width:0;
     height:30px; border-radius:9px; padding:0 10px; font-size:12.5px;
-    background:rgba(255,255,255,.10);
-    box-shadow:inset 0 0 0 1px rgba(255,255,255,.10);
+    background:rgba(16,22,36,.55);
+    box-shadow:inset 0 0 0 1px rgba(255,255,255,.15);
     position:relative; z-index:3;
     -webkit-app-region:no-drag;              /* .add 没盒子了，得自己声明 */
   }
-  .card.solo .add input:hover{ background:rgba(255,255,255,.14); }
+  .card.solo .add input:hover{ background:rgba(16,22,36,.66); }
   .card.solo .add input:focus{
-    background:rgba(255,255,255,.19);
-    box-shadow:inset 0 0 0 1px rgba(255,255,255,.32);
+    background:rgba(16,22,36,.78);
+    box-shadow:inset 0 0 0 1px rgba(255,255,255,.34);
   }
   /* ＋ 钉死在卡片最右：order 必须排在图标后面。
      图标让出的 72px 由输入框吸收（输入框在它左边、可以变窄），
      ＋ 的左右边界因此全程一个像素都不动 —— 用户点它的时候绝不会扑空。 */
   .card.solo .btn-add{
     order:4; flex:0 0 auto; width:30px; height:30px; border-radius:9px;
-    background:transparent;
-    box-shadow:inset 0 0 0 1px rgba(255,255,255,.10);
+    background:rgba(16,22,36,.55);
+    box-shadow:inset 0 0 0 1px rgba(255,255,255,.15);
     position:relative; z-index:3;
     -webkit-app-region:no-drag;
   }
-  .card.solo .btn-add:hover{ background:rgba(255,255,255,.16); }
+  .card.solo .btn-add:hover{ background:rgba(16,22,36,.68); }
   /* 三个图标平时不占位置，鼠标进来才让出空间。
      位置刻意放在「输入框」和「＋」之间：这样让出的宽度全由输入框吸收，
      ＋ 贴在卡片右侧不动 —— 否则它会跟着图标一起左移 80px，用户点不着。
@@ -373,17 +390,17 @@
   .card:not(.full) .tint,
   .card:not(.full)::after{ display:none; }
 
-  /* 没有卡片底垫着，条目自己要更实一点才立得住（浅色壁纸上也看得清） */
+  /* 没有卡片底垫着，条目自己就是唯一的那块"玻璃"：比展开态再实一点 */
   .card:not(.full) .item{
-    background:rgba(255,255,255,.14);
-    box-shadow:inset 0 0 0 1px rgba(255,255,255,.11);
+    background:rgba(16,22,36,.56);
+    box-shadow:inset 0 0 0 1px rgba(255,255,255,.15);
   }
-  .card:not(.full) .item:hover{ background:rgba(255,255,255,.19); }
+  .card:not(.full) .item:hover{ background:rgba(16,22,36,.68); }
   .card:not(.full) .item.done{
-    background:rgba(255,255,255,.07);
-    box-shadow:inset 0 0 0 1px rgba(255,255,255,.06);
+    background:rgba(16,22,36,.34);
+    box-shadow:inset 0 0 0 1px rgba(255,255,255,.08);
   }
-  .card:not(.full) .item.done:hover{ background:rgba(255,255,255,.11); }
+  .card:not(.full) .item.done:hover{ background:rgba(16,22,36,.46); }
 
   /* ---------- 平时只留待办条目，鼠标进来才把整张卡展开 ----------
      收起时 顶栏 / 输入条 / 页脚 直接 display:none —— 卡片是真的变矮，不是留白。
@@ -502,6 +519,10 @@ function pushHist(text, kind) {
 }
 
 /* ================= 渲染 ================= */
+/* 正在双击编辑的条目 id（null = 没在编辑）。渲染时它那一行换成 input，
+   保证光标、选区、撤销都由浏览器自己管，不用手搓。 */
+let editId = null;
+
 function renderList() {
   const rows = $("rows");
   const items = state.items;
@@ -535,11 +556,15 @@ function renderList() {
 
   let html = "";
   items.forEach((t) => {
+    /* 双击进来的那一条换成输入框；其余照常。input 走浏览器原生输入法/撤销/选区 */
+    const body = editId === t.id
+      ? '<input class="etxt" data-id="' + t.id + '" value="' + esc(t.text) + '" spellcheck="false" maxlength="80">'
+      : '<span class="txt">' + esc(t.text) + '</span>';
     html += '<div class="row" data-id="' + t.id + '">' +
       '<div class="hint">' + ICON_TRASH + '<span>松手删除</span></div>' +
-      '<div class="item' + (t.done ? " done" : "") + '" data-id="' + t.id + '">' +
+      '<div class="item' + (t.done ? " done" : "") + (editId === t.id ? " editing" : "") + '" data-id="' + t.id + '">' +
         '<button class="chk" data-act="toggle" title="' + (t.done ? "标记为未完成" : "标记为已完成") + '">' + ICON_CHECK + '</button>' +
-        '<span class="txt">' + esc(t.text) + '</span>' +
+        body +
         '<button class="del" data-act="del" title="删除">' + ICON_TRASH + '</button>' +
       '</div></div>';
   });
@@ -577,6 +602,16 @@ function render() {
   applyFull();   /* 条目增减会改变"该不该展开"，例如删光了要露出输入框 */
   syncAddBtn();
   syncHeight();
+  focusEdit();
+}
+
+/* 渲染完把光标放回编辑框末尾（不全选 —— 多数时候是来改错字的） */
+function focusEdit() {
+  if (!editId) return;
+  const el = $("rows").querySelector(".etxt");
+  if (!el) return;
+  el.focus();
+  try { el.setSelectionRange(el.value.length, el.value.length); } catch (e) {}
 }
 
 /* ================= 窗口高度跟着内容走 =================
@@ -660,7 +695,8 @@ let hovering = false, typing = false;
 
 function wantFull() {
   if (isSolo()) return false;
-  return state.view === "hist" || hovering || typing;
+  /* 双击编辑时也必须展开：鼠标一挪开就把编辑框收掉，会让人以为改丢了 */
+  return state.view === "hist" || hovering || typing || !!editId;
 }
 
 function applyFull() {
@@ -681,12 +717,25 @@ function applySolo() {
 
 const cardEl = $("card");
 
+/* 鼠标离开整张卡 = 这次输入结束了。给 320ms 反悔时间（只是划过去不算），
+   真的走了就把输入框里的话收进待办并松开焦点。 */
+let leaveTimer = null;
+
 cardEl.addEventListener("mouseenter", () => {
+  clearTimeout(leaveTimer);
   hovering = true;
   if (applyFull()) syncHeight(true);
 });
 
 cardEl.addEventListener("mouseleave", () => {
+  clearTimeout(leaveTimer);
+  if (inp.value.trim() && document.activeElement === inp) {
+    leaveTimer = setTimeout(() => {
+      if (cardEl.matches(":hover")) return;
+      if (commitInput()) inp.blur();
+    }, 320);
+  }
+
   /* 窗口刚被挪动时 Chromium 偶尔误报离开，隔一拍再用 :hover 复核，避免抖 */
   setTimeout(() => {
     if (cardEl.matches(":hover")) return;
@@ -779,37 +828,120 @@ inp.addEventListener("input", () => {
   syncAddBtn();
 });
 
+/* 把输入框里的话收进待办。空着返回 false，不惊动任何人。
+   v1.7.0：失焦、鼠标挪走也走这里 —— 用户的原话是"输入完一挪开它自己就加进去"。 */
+let lastCommit = 0;
+function commitInput() {
+  const v = String(inp.value || "").trim();
+  if (!v) return false;
+  if (!add(v)) return false;
+  inp.value = "";
+  syncAddBtn();
+  lastCommit = Date.now();
+  return true;
+}
+
 inp.addEventListener("keydown", (e) => {
   if (e.key === "Enter") {
     e.preventDefault();
     /* 加完就松手：光标留在输入框里，卡片会一直撑着展开态，
        可用户这时候想看的是"刚加进去的那一条"。 */
-    if (add(inp.value)) { inp.value = ""; syncAddBtn(); inp.blur(); }
+    if (commitInput()) inp.blur();
   } else if (e.key === "Escape") {
+    /* 放弃这次输入：先清空再离开，否则一失焦又会被自动加进去 */
+    inp.value = "";
+    syncAddBtn();
     inp.blur();
   }
 });
 
+/* 离开输入框（点别处、点到别的窗口）→ 有内容就自动收进待办 */
+inp.addEventListener("blur", () => { commitInput(); });
+
 $("addBtn").addEventListener("click", () => {
-  if (add(inp.value)) { inp.value = ""; syncAddBtn(); inp.blur(); }
-  else inp.focus();      /* 空着点 ＋：等于"把光标放进输入框" */
+  /* 点 ＋ 的 mousedown 已经让输入框失焦、内容被自动收走了；
+     紧接着这次 click 不要重复添加，也不要把光标抢回来 */
+  if (Date.now() - lastCommit < 300) return;
+  if (!commitInput()) inp.focus();      /* 空着点 ＋：等于"把光标放进输入框" */
 });
 
-/* ================= 交互：完成 / 删除 / 右滑删除 ================= */
+/* ================= 交互：双击改成别的字 ================= */
 const list = $("list");
+
+function beginEdit(id) {
+  if (state.view !== "todo") return false;
+  if (!state.items.some((x) => x.id === id)) return false;
+  if (editId === id) return false;
+  editId = id;
+  render();
+  return true;
+}
+
+/* commit=false 是 Esc：原样退出，不写盘。
+   文字被清空也当作放弃 —— 想删请用垃圾桶或右滑，别让"清空"变成隐形删除。 */
+function endEdit(commit, el) {
+  const box = el || $("rows").querySelector(".etxt");
+  const id = (box && box.dataset && box.dataset.id) || editId;
+  const next = box ? String(box.value || "").trim() : "";
+  const t = state.items.find((x) => x.id === id);
+  if (commit && t && next && next !== t.text) { t.text = next; save(); }
+  editId = null;
+  render();
+}
+
+list.addEventListener("dblclick", (e) => {
+  if (state.view !== "todo" || editId) return;
+  if (e.target.closest(".chk") || e.target.closest(".del") || e.target.closest(".etxt")) return;
+  const item = e.target.closest(".item");
+  if (!item) return;
+  beginEdit(item.dataset.id);
+});
+
+list.addEventListener("keydown", (e) => {
+  const el = e.target;
+  if (!el.classList || !el.classList.contains("etxt")) return;
+  if (e.key === "Enter") { e.preventDefault(); endEdit(true, el); }
+  else if (e.key === "Escape") { e.preventDefault(); endEdit(false, el); }
+});
+
+/* blur 不冒泡，用捕获接：点到别处 = 保存。
+   注意先核 editId —— Enter/Esc 收尾时会把编辑框从 DOM 里摘掉，摘掉一个
+   正握着焦点的元素会立刻甩出一个 blur，不挡住的话 Esc 就成了"确认保存"。 */
+list.addEventListener("blur", (e) => {
+  const el = e.target;
+  if (!el.classList || !el.classList.contains("etxt")) return;
+  if (editId !== el.dataset.id) return;
+  endEdit(true, el);
+}, true);
+
+/* ================= 交互：完成 / 删除 / 右滑删除 ================= */
 let drag = null;            /* { item, row, id, startX, dx, moved } */
 let suppressClick = false;  /* 刚滑完，紧接着的 click 要吞掉，别误标完成 */
+let lastTap = { id: null, t: 0, x: 0, y: 0 };   /* 自己判双击用 */
 
 const THRESHOLD = 82;   /* 滑过这个距离就删（约 1/3 卡宽） */
 
 list.addEventListener("mousedown", (e) => {
   if (e.button !== 0) return;
   if (state.view !== "todo") return;
+  if (editId) return;          /* 正在改字：这期间不要启动滑动手势 */
   const item = e.target.closest(".item");
   if (!item) return;
 
   /* 点在勾选圈或垃圾桶上：走 click，不启动滑动手势 */
   if (e.target.closest(".chk") || e.target.closest(".del")) return;
+
+  /* 双击进编辑 —— 这里自己判，不用原生 dblclick：
+     下面那句 preventDefault（防止拖出文字选区）会把浏览器合成的 dblclick 一起挡掉。 */
+  const now = Date.now();
+  if (lastTap.id === item.dataset.id && now - lastTap.t < 420 &&
+      Math.abs(e.clientX - lastTap.x) < 6 && Math.abs(e.clientY - lastTap.y) < 6) {
+    lastTap = { id: null, t: 0, x: 0, y: 0 };
+    e.preventDefault();
+    beginEdit(item.dataset.id);
+    return;
+  }
+  lastTap = { id: item.dataset.id, t: now, x: e.clientX, y: e.clientY };
 
   drag = {
     item: item,
