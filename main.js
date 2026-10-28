@@ -24,7 +24,16 @@ function acrylicSupported() {
   }
 }
 const USE_ACRYLIC = acrylicSupported();
-const PAD = USE_ACRYLIC ? 0 : 22;
+
+/* 每张卡各自决定要不要系统磨砂。
+   天气卡照旧（磨砂好看）；待办卡不行 —— 它平时要"只剩任务框"，
+   卡片背景必须真的透出桌面，而 acrylic 材质会铺满整个窗口矩形，
+   页面再透明也会被系统那层糊住。所以待办走透明窗口 + 页面自绘。 */
+const CARD_ACRYLIC = { weather: USE_ACRYLIC, todo: false };
+const cardAcrylic = (kind) => CARD_ACRYLIC[kind] !== false && USE_ACRYLIC;
+/* 待办窗口必须正好等于卡片：它靠"鼠标碰到"来决定展开，
+   四周要是留了透明边距，鼠标还在卡片外面卡片就弹开了。 */
+const padOf = (kind) => (kind === "todo" ? 0 : (USE_ACRYLIC ? 0 : 22));
 
 /* 两张卡片的共同配置。stateKey 为 null 的用顶层 x/y/top（天气卡片沿用旧存档，
    不破坏用户已经拖好的位置）；待办用 state.todo 子对象，各记各的。 */
@@ -106,6 +115,8 @@ function createWindow(kind) {
     return alive;
   }
 
+  const acrylic = cardAcrylic(kind);
+  const PAD = padOf(kind);              /* 四周留给投影的透明边距；透明窗口不需要 */
   const WIN_W = cfg.w + PAD * 2;
   const WIN_H = cfg.h + PAD * 2;
 
@@ -116,7 +127,7 @@ function createWindow(kind) {
   /* 默认贴右上角；待办叠在天气卡片正下方，免得两张卡压在一起 */
   const defX = wa.x + wa.width - WIN_W - 24;
   const defY = kind === "todo"
-    ? wa.y + 54 + (CARD_H + PAD * 2) + 14
+    ? wa.y + 54 + (CARD_H + padOf("weather") * 2) + 14
     : wa.y + 54;
 
   let x = Number.isFinite(st.x) ? st.x : defX;
@@ -142,10 +153,12 @@ function createWindow(kind) {
     y: y,
     frame: false,
     /* 磨砂与"透明窗口"在 Windows 上二选一：
-       acrylic 走系统绘制，需要非透明窗口 + 全透明背景色 */
-    transparent: !USE_ACRYLIC,
+       acrylic 走系统绘制，需要非透明窗口 + 全透明背景色。
+       透明窗口那边连 backgroundMaterial 字段都不能带 —— 带着（哪怕是 "none"）
+       窗口仍会走材质合成路径，页面内容会被压成几乎看不见的一层。 */
+    transparent: !acrylic,
     backgroundColor: "#00000000",
-    backgroundMaterial: USE_ACRYLIC ? "acrylic" : "none",
+    ...(acrylic ? { backgroundMaterial: "acrylic" } : {}),
     hasShadow: false,          // 无边框窗口自带阴影会把直角露出来
     resizable: false,
     maximizable: false,
@@ -161,7 +174,7 @@ function createWindow(kind) {
       nodeIntegration: false,
       /* 把"是否启用系统磨砂"透给页面：磨砂模式下卡片必须全透明，否则会把它盖住 */
       additionalArguments: [
-        "--wgt-acrylic=" + (USE_ACRYLIC ? "1" : "0"),
+        "--wgt-acrylic=" + (acrylic ? "1" : "0"),
         "--wgt-card=" + cfg.key,
       ],
       backgroundThrottling: false, // 后台不降频，否则切走再回来数字是旧的
@@ -174,6 +187,7 @@ function createWindow(kind) {
      卡片悬停展开时顶栏+输入条会把条目往下推 65px，只有咬住条目本身，
      鼠标底下的行才不会动。第一次由页面报高度时按当时的窗口位置推出来。 */
   w.__rowsY = null;
+  w.__pad = PAD;     /* 这张卡的透明边距，后面所有 y 换算都按它来 */
 
   /* 定位权限放行，拿不到会自动降级到网络定位（只有天气卡片用得到） */
   if (kind === "weather") {
@@ -197,7 +211,7 @@ function createWindow(kind) {
     const b = w.getBounds();
     if (w.__autoY != null && b.y === w.__autoY) return;
     w.__autoY = null;
-    w.__rowsY = b.y + PAD + (w.__top || 0);   /* 锚点跟着用户整体平移 */
+    w.__rowsY = b.y + w.__pad + (w.__top || 0);   /* 锚点跟着用户整体平移 */
     clearTimeout(moveTimer);
     moveTimer = setTimeout(() => {
       if (w.isDestroyed()) return;
@@ -516,13 +530,14 @@ app.whenReady().then(() => {
     const cardH = Math.round(
       Math.min(Math.max(Number(msg.h) || cfg.h, cfg.minH || cfg.h), maxCard)
     );
-    const H = cardH + PAD * 2;
+    const pad = w.__pad || 0;
+    const H = cardH + pad * 2;
 
-    if (w.__rowsY == null) w.__rowsY = b.y + PAD + top;
+    if (w.__rowsY == null) w.__rowsY = b.y + pad + top;
     w.__top = top;
     w.__topMin = topMin;
 
-    let y = Math.round(w.__rowsY - PAD - top);
+    let y = Math.round(w.__rowsY - pad - top);
     y = Math.max(wa.y + 8, Math.min(y, wa.y + wa.height - H - 8));
 
     if (H === b.height && y === b.y) return true;

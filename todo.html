@@ -233,16 +233,69 @@
   .del:active{ transform:scale(.9); }
   .del svg{ width:12px; height:12px; }
 
-  /* 空状态 */
+  /* 空状态（只剩历史视图会用） */
   .empty{
-    /* 高度 = 正好一行（30 行高 + 3 间距），这样"0 条"和"1 条"窗口一样高，
-       加第一条不会跳；而 1 条就是最矮，不再被空状态占位撑到 3 行的高度。 */
     height:33px;
     display:flex; flex-direction:row; align-items:center; justify-content:center;
     gap:7px; color:rgba(255,255,255,.36);
     font-size:11px; letter-spacing:.3px;
   }
   .empty svg{ width:14px; height:14px; opacity:.6; }
+
+  /* ---------- 一条都没有的时候：整张卡就是「待办 + 输入框 + ＋」一行 ----------
+     不再留一片空白喊"还没有待办"，而是把输入框本身摆成一条待办的样子 ——
+     平时它就是那一条，鼠标点上去直接打字。
+     行高 30 与 .item 完全一致，上下 padding 16/16 => 卡片正好 62px，
+     和「1 条待办」的收起态一模一样高，所以敲回车加第一条时窗口纹丝不动。 */
+  .card.solo{
+    flex-direction:row; align-items:center; gap:8px;
+    padding:16px 15px;
+  }
+  /* 顶栏/输入条自己的盒子不要了，让里面的元素直接成为卡片的横排项 */
+  .card.solo .hd,
+  .card.solo .add{ display:contents; }
+  .card.solo .list,
+  .card.solo .ft{ display:none; }
+
+  .card.solo .ttl{
+    order:1; flex:0 0 auto;
+    position:relative; z-index:3;
+    font-size:14px; font-weight:600; letter-spacing:.2px;
+  }
+  .card.solo .ttl .cnt{ display:none; }      /* 0 条，统计没意义 */
+  .card.solo .add input{
+    order:2; flex:1 1 auto; min-width:0;
+    height:30px; border-radius:9px; padding:0 10px; font-size:12.5px;
+    background:rgba(255,255,255,.10);
+    box-shadow:inset 0 0 0 1px rgba(255,255,255,.10);
+    position:relative; z-index:3;
+    -webkit-app-region:no-drag;              /* .add 没盒子了，得自己声明 */
+  }
+  .card.solo .add input:hover{ background:rgba(255,255,255,.14); }
+  .card.solo .add input:focus{
+    background:rgba(255,255,255,.19);
+    box-shadow:inset 0 0 0 1px rgba(255,255,255,.32);
+  }
+  .card.solo .btn-add{
+    order:3; flex:0 0 auto; width:30px; height:30px; border-radius:9px;
+    background:transparent;
+    box-shadow:inset 0 0 0 1px rgba(255,255,255,.10);
+    position:relative; z-index:3;
+    -webkit-app-region:no-drag;
+  }
+  .card.solo .btn-add:hover{ background:rgba(255,255,255,.16); }
+  /* 三个图标平时不占位置，鼠标进来才让出空间。
+     宽度有确定值才能过渡 —— 输入框跟着平滑变窄，不会硬跳。
+     flex 的 gap 与尺寸无关，宽 0 也照样留 8px 缝，所以用负 margin 抵掉。 */
+  .card.solo .acts{
+    order:4; flex:0 0 auto;
+    position:relative; z-index:3;
+    gap:0;                       /* 图标紧挨着排，别在这么窄的地方再留缝 */
+    width:0; margin-left:-8px;
+    overflow:hidden; opacity:0;
+    transition:width .18s ease, margin-left .18s ease, opacity .16s ease;
+  }
+  .card.solo:hover .acts{ width:72px; margin-left:0; opacity:1; }
 
   /* ---------- 历史视图 ---------- */
   .hlbl{
@@ -305,13 +358,36 @@
   .ft .link{ color:rgba(255,255,255,.55); cursor:pointer; opacity:1; -webkit-app-region:no-drag; }
   .ft .link:hover{ color:#fff; text-decoration:underline; }
 
+  /* ---------- 平时：卡片自己不画背景，桌面直接透出来 ----------
+     收起态只留每一条任务框（条目自己的圆角底），卡片层的渐变 / 内高光 / 叠加色全部撤掉。
+     鼠标进来展开时才长出整张卡片的底色 —— 那时候需要一块板子托住顶栏、输入条和页脚。 */
+  .card:not(.full){
+    background-image:none;
+    box-shadow:none;
+  }
+  .card:not(.full) .tint,
+  .card:not(.full)::after{ display:none; }
+
+  /* 没有卡片底垫着，条目自己要更实一点才立得住（浅色壁纸上也看得清） */
+  .card:not(.full) .item{
+    background:rgba(255,255,255,.14);
+    box-shadow:inset 0 0 0 1px rgba(255,255,255,.11);
+  }
+  .card:not(.full) .item:hover{ background:rgba(255,255,255,.19); }
+  .card:not(.full) .item.done{
+    background:rgba(255,255,255,.07);
+    box-shadow:inset 0 0 0 1px rgba(255,255,255,.06);
+  }
+  .card:not(.full) .item.done:hover{ background:rgba(255,255,255,.11); }
+
   /* ---------- 平时只留待办条目，鼠标进来才把整张卡展开 ----------
      收起时 顶栏 / 输入条 / 页脚 直接 display:none —— 卡片是真的变矮，不是留白。
      展开时页面报新的 h 和 top，主进程把窗口向上长 65px（顶栏22+输入条43），
-     条目在屏幕上的位置不动，所以鼠标底下那一行不会跳。 */
-  .card:not(.full) .hd,
-  .card:not(.full) .add,
-  .card:not(.full) .ft{ display:none; }
+     条目在屏幕上的位置不动，所以鼠标底下那一行不会跳。
+     solo（一条都没有）时这三块另有安排，不能一起隐藏，所以排除掉。 */
+  .card:not(.full):not(.solo) .hd,
+  .card:not(.full):not(.solo) .add,
+  .card:not(.full):not(.solo) .ft{ display:none; }
 
   /* 展开瞬间淡入，别硬蹦出来 */
   @keyframes reveal{ from{ opacity:0; } to{ opacity:1; } }
@@ -447,7 +523,8 @@ function renderList() {
   }
 
   if (!items.length) {
-    rows.innerHTML = '<div class="empty">' + ICON_EMPTY + '<div>还没有待办</div></div>';
+    /* 一条都没有：列表留空，由 .card.solo 那一行（输入框本身）承担整张卡 */
+    rows.innerHTML = "";
     return;
   }
 
@@ -491,7 +568,9 @@ function renderMeta() {
 function render() {
   renderList();
   renderMeta();
+  applySolo();   /* 条目清空/新增会在这两种版式之间切 */
   applyFull();   /* 条目增减会改变"该不该展开"，例如删光了要露出输入框 */
+  syncAddBtn();
   syncHeight();
 }
 
@@ -501,8 +580,15 @@ function render() {
 const pxv = (el, p) => parseFloat(getComputedStyle(el)[p]) || 0;
 const shown = (el) => !!el && getComputedStyle(el).display !== "none";
 
+/* 一条都没有（且不在看历史）→ 整张卡就是「待办 + 输入框 + ＋」横排一行 */
+function isSolo() {
+  return state.view !== "hist" && state.items.length === 0;
+}
+
 /* 待办区上沿距卡片内容顶边的距离：收起时只剩 padding + 列表间距 */
 function topOffset() {
+  /* solo 时没有列表，那一行直接贴着卡片上沿 */
+  if (isSolo()) return Math.round(pxv($("card"), "paddingTop"));
   let t = pxv($("card"), "paddingTop") + pxv($("list"), "marginTop");
   ["hd", "addBar"].forEach((id) => {
     const el = $(id);
@@ -512,8 +598,24 @@ function topOffset() {
   return Math.round(t);
 }
 
+/* 收起状态的 top：拖动窗口时主进程按这个把 y 换算回"安静时的位置"。
+   solo 的上下 padding 刻意是 16/16、非 solo 是 11+5 —— 两者都等于 16，
+   所以两种版式互切时锚点一致，窗口不会平移。 */
+function idleTop() {
+  return Math.round(pxv($("card"), "paddingTop") + (isSolo() ? 0 : pxv($("list"), "marginTop")));
+}
+
 function contentHeight() {
   const card = $("card"), list = $("list");
+  if (isSolo()) {
+    /* 横排一行：最高那个元素 + 上下 padding */
+    const row = Math.max(
+      $("inp").offsetHeight,
+      $("addBtn").offsetHeight,
+      card.querySelector(".ttl").offsetHeight
+    );
+    return pxv(card, "paddingTop") + pxv(card, "paddingBottom") + row;
+  }
   let h = pxv(card, "paddingTop") + pxv(card, "paddingBottom")
         + pxv(list, "marginTop") + pxv(list, "marginBottom")
         + $("rows").offsetHeight;
@@ -537,7 +639,7 @@ function syncHeight(now) {
       window.wgt.setCardHeight({
         h: h,
         top: top,
-        topMin: Math.round(pxv($("card"), "paddingTop") + pxv($("list"), "marginTop")),
+        topMin: idleTop(),
       });
     }
   };
@@ -547,12 +649,13 @@ function syncHeight(now) {
 }
 
 /* ================= 收起 / 展开 =================
-   平时只留条目；这几种情况必须展开：鼠标在卡上、正在打字、
-   列表空（不给输入框就没法加）、在看历史（不给按钮就退不出去）。 */
+   平时只留条目；这几种情况必须展开：鼠标在卡上、正在打字、在看历史。
+   一条都没有时改走 solo 版式：输入框已经在眼前，展开反而会让鼠标底下那一行跳走。 */
 let hovering = false, typing = false;
 
 function wantFull() {
-  return state.view === "hist" || state.items.length === 0 || hovering || typing;
+  if (isSolo()) return false;
+  return state.view === "hist" || hovering || typing;
 }
 
 function applyFull() {
@@ -560,6 +663,14 @@ function applyFull() {
   const card = $("card");
   if (card.classList.contains("full") === on) return false;
   card.classList.toggle("full", on);
+  return true;
+}
+
+function applySolo() {
+  const on = isSolo();
+  const card = $("card");
+  if (card.classList.contains("solo") === on) return false;
+  card.classList.toggle("solo", on);
   return true;
 }
 
@@ -653,22 +764,30 @@ function setView(v) {
 /* ================= 交互：添加 ================= */
 const inp = $("inp");
 
+/* solo 下输入框就是那一条待办，＋ 一直点得动（空着时等于"把光标放进输入框"）。
+   否则一个灰掉的按钮摆在最显眼的位置，会让人以为坏了。 */
+function syncAddBtn() {
+  $("addBtn").disabled = !inp.value.trim() && !isSolo();
+}
+
 inp.addEventListener("input", () => {
-  $("addBtn").disabled = !inp.value.trim();
+  syncAddBtn();
 });
 
 inp.addEventListener("keydown", (e) => {
   if (e.key === "Enter") {
     e.preventDefault();
-    if (add(inp.value)) { inp.value = ""; $("addBtn").disabled = true; }
+    /* 加完就松手：光标留在输入框里，卡片会一直撑着展开态，
+       可用户这时候想看的是"刚加进去的那一条"。 */
+    if (add(inp.value)) { inp.value = ""; syncAddBtn(); inp.blur(); }
   } else if (e.key === "Escape") {
     inp.blur();
   }
 });
 
 $("addBtn").addEventListener("click", () => {
-  if (add(inp.value)) { inp.value = ""; $("addBtn").disabled = true; }
-  inp.focus();
+  if (add(inp.value)) { inp.value = ""; syncAddBtn(); inp.blur(); }
+  else inp.focus();      /* 空着点 ＋：等于"把光标放进输入框" */
 });
 
 /* ================= 交互：完成 / 删除 / 右滑删除 ================= */
