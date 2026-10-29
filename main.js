@@ -154,11 +154,17 @@ function createWindow() {
 
   if (top) w.setAlwaysOnTop(true, "floating");
 
-  /* Win+D（显示桌面）会最小化卡片，但透明无边框的置顶窗过一会儿会被 Chromium
-     自己弹回来 —— 最小化状态和 alwaysOnTop 互相打架，看起来就是"按了显示桌面
-     它又自己冒出来"。干脆最小化时直接隐藏，桌面就真正干净了；
-     想唤回：双击桌面快捷方式（second-instance 会还原+显示）。 */
-  w.on("minimize", () => { if (!w.isDestroyed()) w.hide(); });
+  /* 卡片定位是"桌面部件"：按 Win+D 时别的窗口全收起，卡片要留在桌面上。
+     Win+D 会把卡片最小化（第一下消失、再按又回来 = 用户看到的两下切换）。
+     对策：一旦被最小化立刻还原，等于"拒绝最小化"——两次 Win+D 之间卡片始终在桌面上。
+     restore 会激活窗口，紧接着 blur 交还焦点，避免抢走用户正在打的字。 */
+  w.on("minimize", () => {
+    if (w.isDestroyed()) return;
+    w.restore();
+    w.showInactive();
+    w.blur();
+    try { if (w.isAlwaysOnTop()) w.setAlwaysOnTop(true, "floating"); } catch (e) { /* 重申置顶失败不影响 */ }
+  });
 
   /* 窗口事件留痕（%APPDATA%\WeatherCard\win-events.log）：窗口生命周期事件很罕见，
      一旦用户再报"卡片自己消失/弹出"，这就是精确现场。 */
