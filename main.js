@@ -154,6 +154,22 @@ function createWindow() {
 
   if (top) w.setAlwaysOnTop(true, "floating");
 
+  /* Win+D（显示桌面）会最小化卡片，但透明无边框的置顶窗过一会儿会被 Chromium
+     自己弹回来 —— 最小化状态和 alwaysOnTop 互相打架，看起来就是"按了显示桌面
+     它又自己冒出来"。干脆最小化时直接隐藏，桌面就真正干净了；
+     想唤回：双击桌面快捷方式（second-instance 会还原+显示）。 */
+  w.on("minimize", () => { if (!w.isDestroyed()) w.hide(); });
+
+  /* 窗口事件留痕（%APPDATA%\WeatherCard\win-events.log）：窗口生命周期事件很罕见，
+     一旦用户再报"卡片自己消失/弹出"，这就是精确现场。 */
+  const evlog = (ev) => {
+    try {
+      fs.appendFileSync(path.join(app.getPath("userData"), "win-events.log"),
+        new Date().toISOString() + " " + ev + "\n");
+    } catch (e) { /* 日志失败不影响功能 */ }
+  };
+  ["minimize", "restore", "show", "hide"].forEach((ev) => w.on(ev, () => evlog(ev)));
+
   /* 定位权限放行，拿不到会自动降级到网络定位 */
   try {
     w.webContents.session.setPermissionRequestHandler((wc, permission, cb) => {

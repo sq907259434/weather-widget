@@ -1163,6 +1163,8 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "F5") { e.preventDefault(); boot(false); }
 });
 $("search").addEventListener("click", (e) => { if (e.target === $("search")) closeSearch(); });
+/* 点到卡片外面（桌面空白处 / 其他窗口）→ 卡片失焦 → 自动收起搜索层 */
+window.addEventListener("blur", () => closeSearch());
 
 if (window.wgt) {
   window.wgt.onRefresh(() => boot(false));
