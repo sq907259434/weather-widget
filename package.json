@@ -74,5 +74,8 @@
       "uninstallerIcon": "icon.ico",
       "installerHeaderIcon": "icon.ico"
     }
+  },
+  "dependencies": {
+    "koffi": "^3.3.5"
   }
 }

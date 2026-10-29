@@ -154,6 +154,51 @@ function createWindow() {
 
   if (top) w.setAlwaysOnTop(true, "floating");
 
+  /* Win+D（显示桌面）在这台系统上用 DWM 遮蔽（cloak）隐藏普通窗口——卡片收不到
+     任何 Electron 事件，只能凭空消失又出现。系统的豁免条件是 WS_EX_TOOLWINDOW
+     工具窗样式，而 Electron 的 skipTaskbar 并不给窗口加这个位。
+     这里用 koffi 直接调 user32 补上，每次 show 后重申，确保样式永远在。
+     注意：koffi 3.x 的 func 是数组参数形式，'pointer' 不是合法类型名（用 void *）。 */
+  const evlogSafe = (msg) => {
+    try {
+      fs.appendFileSync(path.join(app.getPath("userData"), "win-events.log"),
+        new Date().toISOString() + " " + msg + "\n");
+    } catch (e) { /* 日志失败不影响功能 */ }
+  };
+  let _setTool = null;
+  try {
+    const koffi = require("koffi");
+    const user32 = koffi.load("user32.dll");
+    const GetWindowLongW = user32.func("GetWindowLongW", "long", ["uintptr_t", "int"]);
+    const SetWindowLongW = user32.func("SetWindowLongW", "long", ["uintptr_t", "int", "long"]);
+    _setTool = function () {
+      try {
+        /* getNativeWindowHandle 返回的是"存句柄值的 buffer"，
+           必须把内容读成整数传参（koffi.as(buffer,'void *') 得到的是指向 buffer 的指针，是坑） */
+        const hwnd = w.getNativeWindowHandle().readBigUInt64LE(0);
+        const GWL_EXSTYLE = -20, WS_EX_TOOLWINDOW = 0x80;
+        const ex = GetWindowLongW(hwnd, GWL_EXSTYLE);
+        if (!(ex & WS_EX_TOOLWINDOW)) {
+          SetWindowLongW(hwnd, GWL_EXSTYLE, ex | WS_EX_TOOLWINDOW);
+          return true;
+        }
+      } catch (e) { evlogSafe("setTool err: " + e.message); }
+      return false;
+    };
+  } catch (e) {
+    evlogSafe("koffi load err: " + e.message);  /* 只影响 Win+D 免疫，不影响其他功能 */
+  }
+  /* Chromium 在窗口 show/激活过程中会重写扩展样式、冲掉我们加的位，
+     所以补一次不够——每秒巡检一次，缺了就补（一次 GetWindowLong 开销可忽略）。
+     只记录前 10 次补位，防止样式反复被冲时日志无限增长。 */
+  if (_setTool) {
+    let _fixes = 0;
+    const tryFix = () => { if (!w.isDestroyed() && _setTool() && _fixes < 10) { _fixes++; evlogSafe("toolwindow bit added #" + _fixes); } };
+    tryFix();
+    w.on("show", tryFix);
+    setInterval(tryFix, 1000);
+  }
+
   /* 卡片定位是"桌面部件"：按 Win+D 时别的窗口全收起，卡片要留在桌面上。
      Win+D 会把卡片最小化（第一下消失、再按又回来 = 用户看到的两下切换）。
      对策：一旦被最小化立刻还原，等于"拒绝最小化"——两次 Win+D 之间卡片始终在桌面上。
