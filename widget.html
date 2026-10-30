@@ -45,16 +45,28 @@
     display:flex; flex-direction:column;
     overflow:hidden;
 
-    /* 兜底色：没有系统磨砂时的天光渐变 */
+    /* 兜底色：没有系统磨砂时的天光渐变。底色浓度受外观「透明度」控制
+       （--a=1 就是原来的不透明渐变；调低后透出 #bd 的桌面快照） */
     background-color:transparent;
-    background-image:linear-gradient(160deg,var(--g1) 0%,var(--g2) 52%,var(--g3) 100%);
+    background-image:linear-gradient(160deg,
+      color-mix(in srgb, var(--g1) calc(var(--a) * 100%), transparent) 0%,
+      color-mix(in srgb, var(--g2) calc(var(--a) * 100%), transparent) 52%,
+      color-mix(in srgb, var(--g3) calc(var(--a) * 100%), transparent) 100%);
 
     box-shadow:
       inset 0 1px 0 rgba(255,255,255,.30),
       inset 0 0 0 1px rgba(255,255,255,.16);
 
-    -webkit-app-region: drag;    /* 整个卡片可拖动窗口 */
+    /* 拖动由页面自己报（见脚本末尾"拖动窗口"）：卡片在桌面层里是 Progman 的
+       子窗口，系统这套 -webkit-app-region: drag 在子窗口上不生效 —— 按住拖
+       只会慢半拍甚至不动。留着 drag 还会把鼠标事件吞给系统，页面连 mousedown
+       都收不到。 */
+    -webkit-app-region: no-drag;
   }
+
+  /* 手按住窗口的这一刻：别选中文字。窗口跟着鼠标跑时一旦拖出选区，
+     画面会蓝一片，看着像花屏。 */
+  body.press-lock, body.press-lock *{ user-select:none !important; }
 
   /* 系统磨砂模式下：卡片自身必须全透明，否则会把系统模糊盖死 */
   body.acrylic .card{
@@ -82,10 +94,13 @@
     pointer-events:none;
   }
 
-  /* 顶部一抹高光，做出玻璃的弧度 */
+  /* 顶部一抹高光，做出玻璃的弧度。
+     注意：只能"铺满整卡 + 把光心放到卡片外面"，不能靠一个矮盒子去裁 ——
+     矮盒子的底边会在半径处切出一条水平硬边，位置正好落在「昆明」下沿，
+     看起来就像一道多余的分隔线。 */
   .card::after{
-    content:""; position:absolute; left:-10%; right:-10%; top:-58%; height:76%; z-index:2;
-    background:radial-gradient(60% 100% at 50% 100%, rgba(255,255,255,.20), transparent 70%);
+    content:""; position:absolute; inset:0; z-index:2; border-radius:inherit;
+    background:radial-gradient(120% 62% at 50% -18%, rgba(255,255,255,.20), transparent 72%);
     pointer-events:none;
   }
 
@@ -123,12 +138,16 @@
   .act.spin svg{ animation:spin .9s linear infinite; }
   @keyframes spin{ to{ transform:rotate(360deg) } }
 
-  /* ---------- 主区 ---------- */
+  /* ---------- 主区 ----------
+     flex:0 0 auto + padding-top 固定：主区只占"内容 + 顶部留白"，下方的空不再各分一半。
+     原先 flex:1 居中时，主区把剩余空间上下各分一半，主区与小时条之间那条分隔线被顶到
+     卡片中线偏下，看着失衡。现在内容贴顶、留白只留在上方（昆明→22° 的间距不变），
+     省下的 22px 分给下面各段，整体往上收、上下更匀。 */
   .main{
-    flex:1 1 auto; min-height:0;
-    display:flex; align-items:center; justify-content:space-between;
+    flex:0 0 auto;
+    display:flex; align-items:flex-start; justify-content:space-between;
     gap:8px;
-    padding:2px 0 0;
+    padding:22px 0 0;
   }
   .left{ min-width:0; }
   .temp{
@@ -143,6 +162,7 @@
   .ico{
     flex:0 0 auto; width:92px; height:92px;
     display:grid; place-items:center;
+    margin-top:5px;   /* 主区改成顶对齐后，云图标靠这个小偏移回到与大温度视觉齐平 */
   }
   .ico svg{
     width:92px; height:92px;
@@ -151,9 +171,9 @@
 
   /* ---------- 小时条 ---------- */
   .hrs{
-    flex:0 0 auto; height:62px;
+    flex:0 0 auto; height:66px;
     display:flex; align-items:center;
-    padding:7px 0 6px;
+    padding:9px 0 8px;
     margin:0 -3px;
     border-top:1px solid rgba(255,255,255,.16);
   }
@@ -168,10 +188,10 @@
 
   /* ---------- 指标条（空气 / 风 / 紫外线） ---------- */
   .mets{
-    flex:0 0 auto; height:34px;
+    flex:0 0 auto; height:37px;
     display:flex; align-items:center;
     border-top:1px solid rgba(255,255,255,.16);
-    padding-top:5px;
+    padding-top:8px;
   }
   .met{
     flex:1 1 0; min-width:0;
@@ -199,11 +219,11 @@
   .dys{
     flex:0 0 auto;
     border-top:1px solid rgba(255,255,255,.16);
-    padding-top:4px;
+    padding-top:7px;
   }
   .drow{
     display:grid; grid-template-columns:32px 18px 1fr 22px 22px;
-    align-items:center; gap:7px; height:22px;
+    align-items:center; gap:7px; height:24px;
   }
   .drow .dn{ font-size:11.5px; font-weight:500; color:rgba(255,255,255,.9); }
   .drow .di svg{ width:17px; height:17px; display:block; filter:drop-shadow(0 1px 2px rgba(0,25,60,.45)); }
@@ -218,7 +238,7 @@
 
   /* ---------- 页脚 ---------- */
   .ft{
-    flex:0 0 auto; height:13px;
+    flex:0 0 auto; height:13px; margin-top:6px;
     display:flex; align-items:center; justify-content:space-between;
     font-size:10px; color:rgba(255,255,255,.58); letter-spacing:.3px;
     text-shadow:0 1px 2px rgba(0,25,55,.18);
@@ -240,9 +260,82 @@
     transition:opacity .22s ease, transform .22s cubic-bezier(.2,.8,.3,1);
   }
   .search.open{ opacity:1; pointer-events:auto; transform:none; }
+  /* 输入框 + 关闭叉 一行。叉是"搜完能退出去"的最后一道保险：
+     桌面层模式下窗口是 Progman 的子窗口，拿不到键盘焦点，ESC 收不到；
+     点桌面空白也不会让子窗口失焦，blur 也不来 —— 这两条以前都能退，
+     贴进桌面层之后就全断了，必须留一个看得见、点得着的出口。 */
+  .search .srow{
+    flex:0 0 auto;
+    display:flex; align-items:center; gap:8px;
+  }
+  .search .sx, .look .sx{
+    flex:0 0 auto; width:34px; height:34px; padding:0; border:0; border-radius:11px;
+    background:rgba(255,255,255,.12); color:rgba(255,255,255,.7);
+    box-shadow:inset 0 0 0 1px rgba(255,255,255,.14);
+    display:grid; place-items:center; cursor:pointer;
+    transition:background .15s ease, color .15s ease, transform .12s ease;
+    -webkit-app-region:no-drag;
+  }
+  .search .sx:hover, .look .sx:hover{ background:rgba(255,255,255,.22); color:#fff; }
+  .search .sx:active, .look .sx:active{ transform:scale(.9); }
+  .search .sx svg, .look .sx svg{ width:14px; height:14px; }
+
+  /* ---------- 外观面板（透明度 / 磨砂，与待办卡同款） ---------- */
+  /* 面板必须是"薄玻璃"而不是深色实心板：滑杆调的是面板**底下**那张卡片的
+     透明度和磨砂，面板一实，调多少都看不见（用户报的"调节不实时"）。 */
+  .look{
+    position:absolute; inset:0; z-index:22;
+    border-radius:10px; padding:14px;
+    display:flex; flex-direction:column; gap:12px;
+    background:rgba(12,20,34,.42);
+    -webkit-backdrop-filter:blur(10px) saturate(140%);
+    backdrop-filter:blur(10px) saturate(140%);
+    border:1px solid rgba(255,255,255,.16);
+    opacity:0; pointer-events:none;
+    transform:scale(.97);
+    transition:opacity .22s ease, transform .22s cubic-bezier(.2,.8,.3,1);
+  }
+  .look.open{ opacity:1; pointer-events:auto; transform:none; }
+  .look .lkhd{
+    flex:0 0 auto; display:flex; align-items:center; justify-content:space-between;
+    font-size:12.5px; color:#fff; letter-spacing:.3px;
+  }
+  .look .lkhd .sx{ width:28px; height:28px; border-radius:9px; }
+  .look .lkrow{
+    display:flex; align-items:center; gap:10px;
+    font-size:12px; color:rgba(255,255,255,.75); -webkit-app-region:no-drag;
+  }
+  .look .lkrow span{ flex:0 0 40px; }
+  .look .lkrow b{ flex:0 0 34px; text-align:right; font-weight:500; font-size:11.5px; color:#fff; }
+  .look .lkrow input[type=range]{
+    -webkit-appearance:none; appearance:none; flex:1 1 auto; height:4px; margin:0;
+    border-radius:2px; background:rgba(255,255,255,.22); outline:0; cursor:pointer;
+  }
+  .look .lkrow input[type=range]::-webkit-slider-thumb{
+    -webkit-appearance:none; width:13px; height:13px; border-radius:50%;
+    background:#fff; box-shadow:0 1px 3px rgba(0,0,0,.4);
+  }
+  .look .lktip{ font-size:10.5px; line-height:1.5; color:rgba(255,255,255,.5); }
+
+  /* ---------- 桌面快照背景（#bd）：透明度/磨砂的真实作用对象 ---------- */
+  :root{ --a:1; --frost:0px; }
+  #bd{
+    position:absolute; left:-22px; top:-22px; width:calc(100% + 44px); height:calc(100% + 44px);
+    z-index:0; pointer-events:none;
+    background-size:cover; background-position:center;
+    opacity:0; transition:opacity .25s ease;
+    filter:blur(var(--frost));
+  }
+  body.has-bd #bd{ opacity:1; }
+  /* 拖动中不藏快照：主进程在起拖时抓了一张"无卡片"的干净全屏快照，
+     拖动中按新位置实时重裁推送（见 main.js dragBegin）。必须垫着它 ——
+     窗口被 region 裁剪后，半透明像素合成不出透明度：快照层一旦缺席，
+     卡片渐变随 --a 变透明、圆角外 alpha=0，全部和黑底混合 ——
+     就是用户报的"拖动时透明/磨砂消失 + 四角黑角"。 */
   .search input{
     -webkit-app-region:no-drag;
-    width:100%; height:34px; flex:0 0 auto;
+    flex:1 1 auto; min-width:0;
+    height:34px;
     border:0; outline:0; border-radius:11px;
     padding:0 11px; font-size:13px; font-family:inherit;
     color:#fff; background:rgba(255,255,255,.12);
@@ -275,6 +368,7 @@
 </head>
 <body data-sky="clear-day">
 
+<div id="bd"></div>
 <div class="card" id="card">
   <div class="tint"></div>
   <div class="hd">
@@ -323,13 +417,58 @@
 </div>
 
 <div class="search" id="search">
-  <input id="q" type="text" placeholder="搜索城市：上海 / km / Tokyo" autocomplete="off">
+  <div class="srow">
+    <input id="q" type="text" placeholder="搜索城市：上海 / km / Tokyo" autocomplete="off">
+    <button class="sx" id="sxBtn" title="关闭搜索（Esc）">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round">
+        <path d="M6 6l12 12M18 6L6 18"/>
+      </svg>
+    </button>
+  </div>
   <div class="res" id="res"><div class="tip">输入城市名后回车</div></div>
+</div>
+
+<div class="look" id="look">
+  <div class="lkhd"><span>外观设置</span>
+    <button class="sx" id="lkBtn" title="关闭（Esc）">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round">
+        <path d="M6 6l12 12M18 6L6 18"/>
+      </svg>
+    </button>
+  </div>
+  <label class="lkrow"><span>透明度</span>
+    <input id="lkAlpha" type="range" min="10" max="90" step="1"><b id="lkAlphaV"></b></label>
+  <label class="lkrow"><span>磨砂</span>
+    <input id="lkFrost" type="range" min="0" max="20" step="1"><b id="lkFrostV"></b></label>
+  <div class="lktip">透明度拉高会透出桌面快照；图标挪过 / 换壁纸后，右键 → 刷新桌面背景</div>
 </div>
 
 <div class="boot" id="boot">正在定位…</div>
 
 <script>
+/* ================= preload 缺失时的兜底 =================
+   window.wgt 由 preload 注入。万一它没加载（asar/路径出问题，或直接在浏览器里
+   打开本文件调试），下面任何一句 window.wgt.xxx 都会抛错 —— 整个脚本死掉，
+   卡片退化成静态 HTML：天气不刷新、搜索和拖动全失效，且看不出是哪坏了。
+   这里补一层空实现，最差也只是"变成一张普通网页卡片"。 */
+if (!window.wgt) {
+  const noop = () => {};
+  const on = () => noop;
+  window.wgt = {
+    acrylic: false,
+    close: noop, menu: noop, raise: noop, rest: noop,
+    dragBegin: noop, dragEnd: noop, scaleStep: noop, searchState: noop,
+    imeBegin: noop, imeEnd: noop,
+    geoIP: () => Promise.resolve([]),
+    backdropNow: () => Promise.resolve(null),
+    getLook: () => Promise.resolve(null),
+    setLook: () => Promise.resolve(true),
+    onSearchExit: on, onRefresh: on, onSearchOpen: on, onRelocate: on,
+    onBackdrop: on, onBdFull: on, onBdPos: on, onBdDragEnd: on,
+    onShowLook: on, onImeText: on, onImeCommit: on, onImeCancel: on, onImeBlur: on,
+  };
+}
+
 /* ================= WMO 天气代码 ================= */
 const WMO = {
   0:{t:"晴",k:"clear"}, 1:{t:"晴间多云",k:"partly"}, 2:{t:"局部多云",k:"partly"},
@@ -1104,8 +1243,121 @@ function openSearch() {
   inp.value = "";
   $("res").innerHTML = '<div class="tip">输入城市名后回车</div>';
   setTimeout(() => inp.focus(), 60);
+  closeLook();   /* 两个层不同时开 */
+  /* 告诉主进程"搜索层开着"：子窗口收不到 ESC / 不会 blur，只能靠主进程
+     轮询系统按键和光标位置来补这两个出口（见 main.js 的 watchSearchExit）。 */
+  try { if (window.wgt && window.wgt.searchState) window.wgt.searchState(true); } catch (e) {}
 }
-function closeSearch() { $("search").classList.remove("open"); }
+function closeSearch() {
+  const was = $("search").classList.contains("open");
+  $("search").classList.remove("open");
+  imeFinish();   /* 搜索层关了，输入桥一起收（普通模式 imeOn 恒 false，无副作用） */
+  if (was) { try { if (window.wgt && window.wgt.searchState) window.wgt.searchState(false); } catch (e) {} }
+}
+
+/* ================= 外观：透明度 / 磨砂（与待办卡同款） =================
+   --a 底色浓度（1=原状不透明渐变），--frost 快照模糊半径。
+   磨砂模糊的是 #bd 那张桌面快照 —— 真透窗里 backdrop-filter 模糊不了桌面。 */
+const LOOK = { alpha: 1, frost: 0 };
+
+function applyLook() {
+  const r = document.documentElement.style;
+  r.setProperty("--a", String(LOOK.alpha));
+  r.setProperty("--frost", LOOK.frost + "px");
+}
+
+function lookUI() {
+  const ai = $("lkAlpha"), fi = $("lkFrost");
+  if (!ai || !fi) return;
+  ai.value = String(Math.round((1 - LOOK.alpha) * 100));
+  fi.value = String(Math.round(LOOK.frost));
+  $("lkAlphaV").textContent = ai.value + "%";
+  $("lkFrostV").textContent = fi.value + "px";
+}
+
+let lookSaveTimer = null;
+function saveLookSoon() {
+  clearTimeout(lookSaveTimer);
+  lookSaveTimer = setTimeout(() => {
+    if (window.wgt && window.wgt.setLook) window.wgt.setLook(LOOK);
+  }, 220);
+}
+
+function openLook() {
+  lookUI();
+  $("look").classList.add("open");
+  /* 复用搜索层那条主进程轮询通道：子窗口收不到 ESC、点外面也不 blur */
+  try { if (window.wgt && window.wgt.searchState) window.wgt.searchState(true); } catch (e) {}
+}
+function closeLook() {
+  const was = $("look").classList.contains("open");
+  $("look").classList.remove("open");
+  if (was) { try { if (window.wgt && window.wgt.searchState) window.wgt.searchState(false); } catch (e) {} }
+}
+
+function bindLook() {
+  const ai = $("lkAlpha"), fi = $("lkFrost");
+  if (!ai || !fi) return;
+  ai.addEventListener("input", () => {
+    LOOK.alpha = Math.min(1, Math.max(0.1, 1 - Number(ai.value) / 100));
+    applyLook();
+    $("lkAlphaV").textContent = ai.value + "%";
+    saveLookSoon();
+  });
+  fi.addEventListener("input", () => {
+    LOOK.frost = Math.min(20, Math.max(0, Number(fi.value) || 0));
+    applyLook();
+    $("lkFrostV").textContent = fi.value + "px";
+    saveLookSoon();
+  });
+  $("lkBtn").addEventListener("click", closeLook);
+}
+
+/* 主进程裁好的快照：按"相对窗口左上角"的 CSS px 铺在 #bd 上 */
+function setBackdrop(p) {
+  const bd = $("bd");
+  if (!p || !p.url) { document.body.classList.remove("has-bd"); return; }
+  bd.style.backgroundImage = "url(" + p.url + ")";
+  bd.style.backgroundSize = "100% 100%";   /* 裁块与元素同尺寸，1:1 铺（拖动后会从这里复位） */
+  bd.style.left = p.left + "px";
+  bd.style.top = p.top + "px";
+  bd.style.width = p.w + "px";
+  bd.style.height = p.h + "px";
+  document.body.classList.add("has-bd");
+}
+
+/* 拖动实况（整幅快照方案）：起拖收到整幅快照，把它按屏幕坐标"钉死"在桌面
+   上 —— 之后拖动 tick 只更新 #bd 的 left/top。背景纹丝不动、窗口在上面滑，
+   像素级对齐；旧的"每 70ms 重裁一块"两次推送之间卡片动了背景没动，
+   拖快了背景就错位（用户报的"透明时和背景没对齐"）。
+   devicePixelRatio 已含页面 zoom，物理 px ÷ 它 = CSS px。 */
+let bdFullImg = null;    /* { url, ox, oy, w, h } —— blob 缓存，一次拖动只解码一次 */
+function placeBdFull(x, y) {
+  if (!bdFullImg) return;
+  const bd = $("bd");
+  if (!bd) return;
+  const s = window.devicePixelRatio || 1;
+  bd.style.left = ((bdFullImg.ox - x) / s) + "px";
+  bd.style.top = ((bdFullImg.oy - y) / s) + "px";
+  bd.style.width = (bdFullImg.w / s) + "px";
+  bd.style.height = (bdFullImg.h / s) + "px";
+  bd.style.backgroundImage = "url(" + bdFullImg.url + ")";
+  bd.style.backgroundSize = "100% 100%";
+  document.body.classList.add("has-bd");
+}
+if (window.wgt.onBdFull) window.wgt.onBdFull((p) => {
+  if (!p || !p.png) return;
+  if (bdFullImg) { try { URL.revokeObjectURL(bdFullImg.url); } catch (e) { } }
+  bdFullImg = {
+    url: URL.createObjectURL(new Blob([p.png], { type: "image/png" })),
+    ox: p.ox, oy: p.oy, w: p.w, h: p.h,
+  };
+});
+if (window.wgt.onBdPos) window.wgt.onBdPos((p) => placeBdFull(p.x, p.y));
+if (window.wgt.onBdDragEnd) window.wgt.onBdDragEnd(() => {
+  /* 松手后主进程推 patch 载荷，setBackdrop 重设 #bd —— 这里不用动。
+     bdFullImg 特意不撤销：下回拖动直接复用，除非快照更新重发。 */
+});
 
 let searchTimer = null;
 async function doSearch(q) {
@@ -1136,6 +1388,8 @@ async function doSearch(q) {
 
 /* ================= 交互绑定 ================= */
 $("cityBtn").addEventListener("click", openSearch);
+/* 搜索层右上角的叉：桌面层里 ESC 和"点空白"都可能收不到，这是保底出口 */
+$("sxBtn").addEventListener("click", () => closeSearch());
 $("menuBtn").addEventListener("click", () => { if (window.wgt) window.wgt.menu(); });
 $("refreshBtn").addEventListener("click", () => boot(false));
 $("closeBtn").addEventListener("click", () => {
@@ -1158,8 +1412,43 @@ $("q").addEventListener("keydown", (e) => {
   if (e.key === "Enter") { clearTimeout(searchTimer); doSearch(e.target.value); }
   if (e.key === "Escape") closeSearch();
 });
+
+/* ================= 桌面层输入桥 =================
+   卡片贴进桌面层后是 Progman 的子窗口，永远进不了前台输入队列 ——
+   系统键盘（含输入法）到不了搜索框。主进程的隐形"幽灵输入窗"代收
+   （见 main.js「桌面层输入桥」）：搜索框一拿焦点就报屏幕矩形，
+   文字/回车/Esc/失焦实时桥回来。普通窗口模式主进程会忽略请求。 */
+let imeOn = false;
+
+$("q").addEventListener("focusin", () => {
+  if (!window.wgt || !window.wgt.imeBegin) return;
+  /* ★ 一聚焦就算"桥已打开"（同待办卡）：否则点进来没打字就点走时
+     imeFinish 会早退，幽灵输入窗收不到结束信号。 */
+  imeOn = true;
+  const r = $("q").getBoundingClientRect();
+  window.wgt.imeBegin({ x: r.left, y: r.top, w: r.width, h: r.height, value: $("q").value });
+});
+
+function imeFinish() {
+  if (!imeOn) return;
+  imeOn = false;
+  if (window.wgt && window.wgt.imeEnd) window.wgt.imeEnd();
+}
+
+if (window.wgt && window.wgt.onImeText) {
+  window.wgt.onImeText((v) => {
+    imeOn = true;
+    $("q").value = String(v == null ? "" : v);
+    /* 和手打一样走防抖搜索：幽灵窗代收的字也能边打边出结果 */
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(() => doSearch($("q").value), 420);
+  });
+  window.wgt.onImeCommit(() => { imeFinish(); doSearch($("q").value); });
+  window.wgt.onImeCancel(() => { imeFinish(); $("q").value = ""; $("res").innerHTML = '<div class="tip">输入城市名后回车</div>'; });
+  window.wgt.onImeBlur(() => { imeFinish(); });   /* 点去别处：留着已输入的文字 */
+}
 document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape") closeSearch();
+  if (e.key === "Escape") { closeSearch(); closeLook(); }
   if (e.key === "F5") { e.preventDefault(); boot(false); }
 });
 $("search").addEventListener("click", (e) => { if (e.target === $("search")) closeSearch(); });
@@ -1169,8 +1458,26 @@ window.addEventListener("blur", () => closeSearch());
 if (window.wgt) {
   window.wgt.onRefresh(() => boot(false));
   window.wgt.onSearchOpen(openSearch);
+  /* 主进程替搜索层盯着的两个出口：ESC、点到窗口外面 */
+  if (window.wgt.onSearchExit) window.wgt.onSearchExit(() => { closeSearch(); closeLook(); });
   /* 菜单里的「回到自动定位」：清掉手动选择，重新按定位走一遍 */
   window.wgt.onRelocate(() => boot(true));
+  /* 桌面快照背景 + 外观面板 */
+  if (window.wgt.onBackdrop) window.wgt.onBackdrop(setBackdrop);
+  if (window.wgt.backdropNow) window.wgt.backdropNow().then(setBackdrop).catch(() => {});
+  if (window.wgt.onShowLook) window.wgt.onShowLook(() => {
+    if ($("look").classList.contains("open")) closeLook(); else openLook();
+  });
+  if (window.wgt.getLook) {
+    window.wgt.getLook().then((v) => {
+      if (!v) return;
+      if (Number.isFinite(v.alpha)) LOOK.alpha = Math.min(1, Math.max(0.1, v.alpha));
+      if (Number.isFinite(v.frost)) LOOK.frost = Math.min(20, Math.max(0, v.frost));
+      applyLook();
+      lookUI();
+    }).catch(() => {});
+  }
+  bindLook();
 }
 
 /* 回到前台补一次（超过 3 分钟才拉，避免无意义请求） */
@@ -1200,6 +1507,44 @@ if (cardBox && window.wgt && window.wgt.raise) {
     }, 110);
   });
 }
+
+/* ================= 拖动窗口：只报按下/松开，位置由主进程跟光标 =================
+   卡片贴进桌面层后是 Progman 的子窗口（WS_CHILD），系统自带的
+   -webkit-app-region: drag 在子窗口上不生效（用户实测：拖不动 / 慢半拍 / 一闪一闪）。
+   子窗口本身能移动，所以改成主进程每 8ms 读系统光标直接 SetWindowPos ——
+   页面这边只负责告诉它"左键在卡上按下了""松开了"，不参与算位移
+   （渲染进程算位移再逐帧 IPC 会慢半拍，窗口一动 mousemove 就被节流）。
+
+   交互区（按钮、城市、搜索层、搜索结果）不能当拖动手柄。 */
+const NO_DRAG = "button, a, input, #search, #cityBtn, .acts, .city, .r";
+let pressing = false;
+
+function endPress() {
+  if (!pressing) return;
+  pressing = false;
+  document.body.classList.remove("press-lock");
+  if (window.wgt && window.wgt.dragEnd) window.wgt.dragEnd();
+}
+
+window.addEventListener("mousedown", (e) => {
+  if (e.button !== 0) return;
+  if (e.target.closest(NO_DRAG)) return;
+  pressing = true;
+  document.body.classList.add("press-lock");   /* 拖窗口时别选中文字 */
+  if (window.wgt && window.wgt.dragBegin) window.wgt.dragBegin();
+}, true);
+
+window.addEventListener("mouseup", () => endPress());
+window.addEventListener("blur", () => endPress());
+
+/* Ctrl+滚轮缩放：5% 一档，70%~160%。
+   普通滚轮不拦（城市搜索列表还要用它滚动），只有按住 Ctrl 才改成缩放，
+   同时挡掉 Chromium 自带的页面缩放 —— 那会把内容缩成一小块、窗口不变。 */
+window.addEventListener("wheel", (e) => {
+  if (!e.ctrlKey) return;
+  e.preventDefault();
+  if (window.wgt && window.wgt.scaleStep) window.wgt.scaleStep(e.deltaY < 0 ? 1 : -1);
+}, { passive: false });
 
 boot(false);   /* 有 30 分钟内的定位结果就直接用，没有再重新识别 */
 </script>
