@@ -389,8 +389,13 @@ function applyCardRegion(w) {
   try { dpi = screen.getDisplayMatching(b).scaleFactor || 1; } catch (e) {}
   try { zoom = w.webContents.getZoomFactor() || 1; } catch (e) {}
   const s = dpi * zoom;
-  /* 卡片在窗口里的位置：透明模式四周留 PAD（磨砂模式 PAD=0，窗口就是卡片） */
-  const m = Math.round(PAD * s);
+  /* ★ 裁切矩形必须等于"卡片真实占的地方"，不是窗口减 PAD。
+     页面里 .card 是 position:absolute; inset:0 —— 卡片铺满整个窗口，
+     并没有给投影留边距（#bd 才是往外扩 44px 那层）。
+     原来按 PAD=22 缩进，实测把卡片四边各切掉 22 CSS px（窗口 582x598，
+     可见区域只有 512x528），连左右两边的文字都被切了 —— 用户看到的"显示不全"。
+     磨砂模式 PAD 本来就是 0，所以只有"贴进桌面"这条路上会犯。 */
+  const m = 0;
   const W = Math.round(b.width * dpi), H = Math.round(b.height * dpi);
   const rad = Math.max(2, Math.round(10 * s));   /* CSS border-radius:10px */
   let hrgn = 0;
