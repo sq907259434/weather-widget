@@ -1,0 +1,85 @@
+{
+  "name": "weather-card",
+  "productName": "WeatherCard",
+  "version": "1.3.1",
+  "description": "天气卡片 —— 桌面磨砂玻璃天气小卡（Electron 独立版）",
+  "author": {
+    "name": "WeatherWidget Contributors"
+  },
+  "license": "MIT",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "icon": "python tools/make-icon.py icon.png icon.ico",
+    "dist": "electron-builder --win",
+    "dist:dir": "electron-builder --win --dir"
+  },
+  "devDependencies": {
+    "electron": "^33.4.11",
+    "electron-builder": "25.1.8"
+  },
+  "build": {
+    "appId": "com.weatherwidget.card",
+    "productName": "WeatherCard",
+    "copyright": "Copyright © 2026 WeatherWidget Contributors",
+    "asar": true,
+    "compression": "maximum",
+    "npmRebuild": false,
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "desktop-layer.js",
+      "backdrop.js",
+      "preload.js",
+      "widget.html",
+      "ime.html",
+      "ime-preload.js",
+      "icon.png",
+      "package.json"
+    ],
+    "win": {
+      "icon": "icon.ico",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "${productName}-${version}-${arch}-setup.${ext}"
+    },
+    "portable": {
+      "artifactName": "${productName}-${version}-${arch}-portable.${ext}",
+      "requestExecutionLevel": "user"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "天气卡片",
+      "uninstallDisplayName": "天气卡片",
+      "runAfterFinish": true,
+      "deleteAppDataOnUninstall": false,
+      "multiLanguageInstaller": true,
+      "language": "2052",
+      "include": "build/installer.nsh",
+      "installerIcon": "icon.ico",
+      "uninstallerIcon": "icon.ico",
+      "installerHeaderIcon": "icon.ico"
+    }
+  },
+  "dependencies": {
+    "koffi": "^3.3.5"
+  }
+}

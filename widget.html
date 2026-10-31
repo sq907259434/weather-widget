@@ -1,0 +1,1642 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>天气卡片</title>
+<style>
+  :root{
+    --g1:#1668cf; --g2:#4a9ef0; --g3:#9ed3fb;
+    --ink:#fff;
+    --ink-2:rgba(255,255,255,.72);
+    --ink-3:rgba(255,255,255,.48);
+  }
+
+  body[data-sky="clear-day"]   { --g1:#1668cf; --g2:#4a9ef0; --g3:#9ed3fb; }
+  body[data-sky="clear-night"] { --g1:#070c18; --g2:#12203c; --g3:#2b3f68; }
+  body[data-sky="partly-day"]  { --g1:#2a74c9; --g2:#6ba8e4; --g3:#b4d4f2; }
+  body[data-sky="partly-night"]{ --g1:#0a1020; --g2:#1a2742; --g3:#31456a; }
+  body[data-sky="cloudy"]      { --g1:#46586e; --g2:#71869c; --g3:#a4b4c4; }
+  body[data-sky="rain"]        { --g1:#131f33; --g2:#2a425c; --g3:#4c6b88; }
+  body[data-sky="drizzle"]     { --g1:#1c2c42; --g2:#36506c; --g3:#5f8099; }
+  body[data-sky="snow"]        { --g1:#54687b; --g2:#8ba0b3; --g3:#cfdbe5; --scrim:.34; }
+  body[data-sky="thunder"]     { --g1:#0f0e1a; --g2:#28223c; --g3:#423a5a; }
+  body[data-sky="fog"]         { --g1:#586372; --g2:#8693a0; --g3:#b8c1ca; --scrim:.30; }
+
+  *{ box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+
+  html,body{
+    margin:0; padding:0; width:100%; height:100%;
+    background:transparent;      /* 窗口透明，露出桌面 */
+    overflow:hidden;
+    font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","SF Pro Text","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+    color:var(--ink);
+    -webkit-font-smoothing:antialiased;
+    font-variant-numeric:tabular-nums;
+    cursor:default;
+    user-select:none;
+  }
+
+  /* ---------- 卡片 ---------- */
+  .card{
+    position:absolute; inset:0;
+    /* 圆角 10 → 18：10px 在 286px 宽的卡上几乎看不出圆，四角显得"方"；
+       18px 和倒计时卡（30px，但它更小）观感接近。窗口区域半径要跟着一起改。 */
+    border-radius:18px;
+    padding:15px 17px 13px;
+    display:flex; flex-direction:column;
+    overflow:hidden;
+
+    /* 兜底色：没有系统磨砂时的天光渐变。底色浓度受外观「透明度」控制
+       （--a=1 就是原来的不透明渐变；调低后透出 #bd 的桌面快照） */
+    background-color:transparent;
+    background-image:linear-gradient(160deg,
+      color-mix(in srgb, var(--g1) calc(var(--a) * 100%), transparent) 0%,
+      color-mix(in srgb, var(--g2) calc(var(--a) * 100%), transparent) 52%,
+      color-mix(in srgb, var(--g3) calc(var(--a) * 100%), transparent) 100%);
+
+    box-shadow:
+      inset 0 1px 0 rgba(255,255,255,.30),
+      inset 0 0 0 1px rgba(255,255,255,.10);
+
+    /* 拖动由页面自己报（见脚本末尾"拖动窗口"）：卡片在桌面层里是 Progman 的
+       子窗口，系统这套 -webkit-app-region: drag 在子窗口上不生效 —— 按住拖
+       只会慢半拍甚至不动。留着 drag 还会把鼠标事件吞给系统，页面连 mousedown
+       都收不到。 */
+    -webkit-app-region: no-drag;
+  }
+
+  /* 手按住窗口的这一刻：别选中文字。窗口跟着鼠标跑时一旦拖出选区，
+     画面会蓝一片，看着像花屏。 */
+  body.press-lock, body.press-lock *{ user-select:none !important; }
+
+  /* 系统磨砂模式下：卡片自身必须全透明，否则会把系统模糊盖死 */
+  /* 四角缩放热区 */
+  .rz{
+    position:absolute; width:26px; height:26px; z-index:9;
+    cursor:nwse-resize;
+  }
+  .rz-tl{ left:0; top:0; }
+  .rz-br{ right:0; bottom:0; }
+  .rz-tr{ right:0; top:0; cursor:nesw-resize; }
+  .rz-bl{ left:0; bottom:0; cursor:nesw-resize; }
+  .rz::after{
+    content:""; position:absolute; width:9px; height:9px;
+    opacity:0; transition:opacity .15s ease;
+  }
+  .rz-tl::after{ left:3px; top:3px; border-left:2px solid rgba(255,255,255,.5); border-top:2px solid rgba(255,255,255,.5); border-radius:2px 0 0 0; }
+  .rz-br::after{ right:3px; bottom:3px; border-right:2px solid rgba(255,255,255,.5); border-bottom:2px solid rgba(255,255,255,.5); border-radius:0 0 2px 0; }
+  .rz-tr::after{ right:3px; top:3px; border-right:2px solid rgba(255,255,255,.5); border-top:2px solid rgba(255,255,255,.5); border-radius:0 2px 0 0; }
+  .rz-bl::after{ left:3px; bottom:3px; border-left:2px solid rgba(255,255,255,.5); border-bottom:2px solid rgba(255,255,255,.5); border-radius:0 0 0 2px; }
+  .rz:hover::after{ opacity:1; }
+
+  body.acrylic .card{
+    background-image:none;
+    background-color:transparent;
+  }
+
+  /* 天光层：给磨砂玻璃染上当前天气的色调，同时保证白字对比度 */
+  .card .tint{
+    position:absolute; inset:0; z-index:1; pointer-events:none;
+    background:linear-gradient(160deg,
+      color-mix(in srgb, var(--g1) 55%, transparent) 0%,
+      color-mix(in srgb, var(--g2) 48%, transparent) 52%,
+      color-mix(in srgb, var(--g3) 46%, transparent) 100%);
+    transition:background .8s ease;
+  }
+
+  /* 浅色天光时压暗下半部，保证白字可读 */
+  .card::before{
+    content:""; position:absolute; inset:0; z-index:2; border-radius:inherit;
+    background:linear-gradient(180deg,
+      rgba(4,14,28,0) 34%,
+      rgba(4,14,28,calc(var(--scrim, 0) * .55)) 72%,
+      rgba(4,14,28,var(--scrim, 0)) 100%);
+    pointer-events:none;
+  }
+
+  /* 顶部一抹高光，做出玻璃的弧度。
+     注意：只能"铺满整卡 + 把光心放到卡片外面"，不能靠一个矮盒子去裁 ——
+     矮盒子的底边会在半径处切出一条水平硬边，位置正好落在「昆明」下沿，
+     看起来就像一道多余的分隔线。 */
+  .card::after{
+    content:""; position:absolute; inset:0; z-index:2; border-radius:inherit;
+    background:radial-gradient(120% 62% at 50% -18%, rgba(255,255,255,.20), transparent 72%);
+    pointer-events:none;
+  }
+
+  .card > .hd, .card > .main, .card > .hrs, .card > .mets, .card > .dys, .card > .ft{
+    position:relative; z-index:3;
+  }
+
+  /* ---------- 顶栏 ---------- */
+  .hd{
+    height:22px; flex:0 0 auto;
+    display:flex; align-items:center; justify-content:space-between;
+  }
+  .city{
+    -webkit-app-region:no-drag;
+    display:flex; align-items:center; gap:5px;
+    font-size:14px; font-weight:600; letter-spacing:.2px;
+    cursor:pointer; max-width:180px;
+  }
+  .city span.nm{
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  }
+  .city svg{ width:10px; height:10px; opacity:.75; flex:0 0 auto; }
+
+  .acts{ display:flex; align-items:center; gap:2px; -webkit-app-region:no-drag; }
+  .act{
+    width:24px; height:24px; border:0; padding:0; border-radius:50%;
+    background:transparent; color:var(--ink-2); cursor:pointer;
+    display:grid; place-items:center;
+    opacity:.34; transition:opacity .2s ease, background .15s ease, transform .15s ease;
+  }
+  .card:hover .act{ opacity:.95; }
+  .act:hover{ background:rgba(255,255,255,.16); color:#fff; }
+  .act:active{ transform:scale(.88); }
+  .act svg{ width:13px; height:13px; }
+  .act.spin svg{ animation:spin .9s linear infinite; }
+  @keyframes spin{ to{ transform:rotate(360deg) } }
+
+  /* ---------- 主区 ----------
+     flex:0 0 auto + padding-top 固定：主区只占"内容 + 顶部留白"，下方的空不再各分一半。
+     原先 flex:1 居中时，主区把剩余空间上下各分一半，主区与小时条之间那条分隔线被顶到
+     卡片中线偏下，看着失衡。现在内容贴顶、留白只留在上方（昆明→22° 的间距不变），
+     省下的 22px 分给下面各段，整体往上收、上下更匀。 */
+  .main{
+    flex:0 0 auto;
+    display:flex; align-items:flex-start; justify-content:space-between;
+    gap:8px;
+    padding:22px 0 0;
+  }
+  .left{ min-width:0; }
+  .temp{
+    display:flex; align-items:flex-start;
+    font-size:72px; font-weight:200; line-height:.88;
+    letter-spacing:-3.5px; margin:0;
+  }
+  .temp i{ font-size:30px; font-style:normal; font-weight:200; margin-top:5px; letter-spacing:0; opacity:.9; }
+  .desc{ font-size:13.5px; font-weight:500; margin-top:5px; letter-spacing:.3px; }
+  .range{ font-size:11.5px; color:var(--ink-2); margin-top:3px; }
+
+  .ico{
+    flex:0 0 auto; width:92px; height:92px;
+    display:grid; place-items:center;
+    margin-top:5px;   /* 主区改成顶对齐后，云图标靠这个小偏移回到与大温度视觉齐平 */
+  }
+  .ico svg{
+    width:92px; height:92px;
+    filter:drop-shadow(0 6px 16px rgba(0,10,30,.26));
+  }
+
+  /* ---------- 小时条 ---------- */
+  .hrs{
+    flex:0 0 auto; height:66px;
+    display:flex; align-items:center;
+    padding:9px 0 8px;
+    margin:0 -3px;
+    border-top:1px solid rgba(255,255,255,.16);
+  }
+  .hr{
+    flex:1 1 0; min-width:0;
+    display:flex; flex-direction:column; align-items:center; gap:3px;
+  }
+  .hr .t{ font-size:10.5px; color:var(--ink-2); letter-spacing:.2px; }
+  .hr.now .t{ color:#fff; font-weight:600; }
+  .hr .i svg{ width:19px; height:19px; display:block; }
+  .hr .v{ font-size:12px; font-weight:500; }
+
+  /* ---------- 指标条（空气 / 风 / 紫外线） ---------- */
+  .mets{
+    flex:0 0 auto; height:37px;
+    display:flex; align-items:center;
+    border-top:1px solid rgba(255,255,255,.16);
+    padding-top:8px;
+  }
+  .met{
+    flex:1 1 0; min-width:0;
+    display:flex; align-items:center; gap:4px;
+  }
+  .met svg{ width:12px; height:12px; flex:0 0 auto; opacity:.72; }
+  .met .lb{ font-size:9.5px; color:var(--ink-3); letter-spacing:.2px; white-space:nowrap; }
+  .met .vl{
+    font-size:11px; font-weight:600; letter-spacing:.1px;
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  }
+  /* 等级配色：q1~q6 = 优/良/轻度/中度/重度/严重；u1~u6 = 弱/中等/强/很强/极强 */
+  .met .vl.q1{ color:#8fe394; }
+  .met .vl.q2{ color:#8fe394; }
+  .met .vl.q3{ color:#ffd166; }
+  .met .vl.q4{ color:#ffab5e; }
+  .met .vl.q5, .met .vl.q6{ color:#ff7a7a; }
+  .met .vl.u1{ color:#a8dbc6; }
+  .met .vl.u2{ color:#e6e8a8; }
+  .met .vl.u3{ color:#ffd166; }
+  .met .vl.u4{ color:#ffab5e; }
+  .met .vl.u5, .met .vl.u6{ color:#ff7a7a; }
+
+  /* ---------- 三天 ---------- */
+  .dys{
+    flex:0 0 auto;
+    border-top:1px solid rgba(255,255,255,.16);
+    padding-top:7px;
+  }
+  .drow{
+    display:grid; grid-template-columns:32px 18px 1fr 22px 22px;
+    align-items:center; gap:7px; height:24px;
+  }
+  .drow .dn{ font-size:11.5px; font-weight:500; color:rgba(255,255,255,.9); }
+  .drow .di svg{ width:17px; height:17px; display:block; filter:drop-shadow(0 1px 2px rgba(0,25,60,.45)); }
+  .drow .dlo{ font-size:11.5px; color:var(--ink-3); text-align:right; }
+  .drow .dhi{ font-size:11.5px; font-weight:500; text-align:right; }
+  .bar{ position:relative; height:3px; border-radius:2px; background:rgba(255,255,255,.11); }
+  .bar > span{ position:absolute; top:0; bottom:0; border-radius:2px; overflow:hidden; }
+  .bar > span > i{
+    position:absolute; top:0; height:100%;
+    background-image:linear-gradient(90deg,#63d0ff 0%,#a8e05f 34%,#ffd60a 62%,#ff9f0a 100%);
+  }
+
+  /* ---------- 页脚 ---------- */
+  .ft{
+    flex:0 0 auto; height:13px; margin-top:6px;
+    display:flex; align-items:center; justify-content:space-between;
+    font-size:10px; color:rgba(255,255,255,.58); letter-spacing:.3px;
+    text-shadow:0 1px 2px rgba(0,25,55,.18);
+  }
+  .ft .top{ opacity:0; transition:opacity .2s ease; color:rgba(255,255,255,.58); }
+  body:hover .ft .top{ opacity:1; }
+
+  /* ---------- 搜索层 ---------- */
+  .search{
+    position:absolute; inset:0; z-index:20;
+    border-radius:10px; padding:14px;
+    display:flex; flex-direction:column;
+    background:rgba(16,24,38,.86);
+    -webkit-backdrop-filter:blur(28px) saturate(160%);
+    backdrop-filter:blur(28px) saturate(160%);
+    border:1px solid rgba(255,255,255,.16);
+    opacity:0; pointer-events:none;
+    transform:scale(.97);
+    transition:opacity .22s ease, transform .22s cubic-bezier(.2,.8,.3,1);
+  }
+  .search.open{ opacity:1; pointer-events:auto; transform:none; }
+  /* 输入框 + 关闭叉 一行。叉是"搜完能退出去"的最后一道保险：
+     桌面层模式下窗口是 Progman 的子窗口，拿不到键盘焦点，ESC 收不到；
+     点桌面空白也不会让子窗口失焦，blur 也不来 —— 这两条以前都能退，
+     贴进桌面层之后就全断了，必须留一个看得见、点得着的出口。 */
+  .search .srow{
+    flex:0 0 auto;
+    display:flex; align-items:center; gap:8px;
+  }
+  .search .sx, .look .sx{
+    flex:0 0 auto; width:34px; height:34px; padding:0; border:0; border-radius:11px;
+    background:rgba(255,255,255,.12); color:rgba(255,255,255,.7);
+    box-shadow:inset 0 0 0 1px rgba(255,255,255,.14);
+    display:grid; place-items:center; cursor:pointer;
+    transition:background .15s ease, color .15s ease, transform .12s ease;
+    -webkit-app-region:no-drag;
+  }
+  .search .sx:hover, .look .sx:hover{ background:rgba(255,255,255,.22); color:#fff; }
+  .search .sx:active, .look .sx:active{ transform:scale(.9); }
+  .search .sx svg, .look .sx svg{ width:14px; height:14px; }
+
+  /* ---------- 外观面板（透明度 / 磨砂，与待办卡同款） ---------- */
+  /* 面板必须是"薄玻璃"而不是深色实心板：滑杆调的是面板**底下**那张卡片的
+     透明度和磨砂，面板一实，调多少都看不见（用户报的"调节不实时"）。 */
+  .look{
+    position:absolute; inset:0; z-index:22;
+    border-radius:10px; padding:14px;
+    display:flex; flex-direction:column; gap:12px;
+    background:rgba(12,20,34,.42);
+    -webkit-backdrop-filter:blur(10px) saturate(140%);
+    backdrop-filter:blur(10px) saturate(140%);
+    border:1px solid rgba(255,255,255,.16);
+    opacity:0; pointer-events:none;
+    transform:scale(.97);
+    transition:opacity .22s ease, transform .22s cubic-bezier(.2,.8,.3,1);
+  }
+  .look.open{ opacity:1; pointer-events:auto; transform:none; }
+  .look .lkhd{
+    flex:0 0 auto; display:flex; align-items:center; justify-content:space-between;
+    font-size:12.5px; color:#fff; letter-spacing:.3px;
+  }
+  .look .lkhd .sx{ width:28px; height:28px; border-radius:9px; }
+  .look .lkrow{
+    display:flex; align-items:center; gap:10px;
+    font-size:12px; color:rgba(255,255,255,.75); -webkit-app-region:no-drag;
+  }
+  .look .lkrow span{ flex:0 0 40px; }
+  .look .lkrow b{ flex:0 0 34px; text-align:right; font-weight:500; font-size:11.5px; color:#fff; }
+  .look .lkrow input[type=range]{
+    -webkit-appearance:none; appearance:none; flex:1 1 auto; height:4px; margin:0;
+    border-radius:2px; background:rgba(255,255,255,.22); outline:0; cursor:pointer;
+  }
+  .look .lkrow input[type=range]::-webkit-slider-thumb{
+    -webkit-appearance:none; width:13px; height:13px; border-radius:50%;
+    background:#fff; box-shadow:0 1px 3px rgba(0,0,0,.4);
+  }
+  .look .lktip{ font-size:10.5px; line-height:1.5; color:rgba(255,255,255,.5); }
+
+  /* ---------- 桌面快照背景（#bd）：透明度/磨砂的真实作用对象 ---------- */
+  :root{ --a:1; --frost:0px; }
+  #bd{
+    position:absolute; left:-22px; top:-22px; width:calc(100% + 44px); height:calc(100% + 44px);
+    z-index:0; pointer-events:none;
+    /* ★ 把快照层自己裁成卡片的圆角形状。
+       窗口区域（SetWindowRgn）一旦没设上，窗口就是直角，这层快照会从四个角
+       露出来 —— 就是用户截到的"四角各有一个浅色方块"。
+       在这里用 clip-path 兜底：快照比卡片大 22px，所以往里收 22px 再圆角 18px，
+       正好和卡片轮廓重合，四角变透明（露出后面的桌面）。 */
+    clip-path:inset(22px 22px 22px 22px round 18px);
+    background-size:cover; background-position:center;
+    opacity:0; transition:opacity .25s ease;
+    filter:blur(var(--frost));
+  }
+  body.has-bd #bd{ opacity:1; }
+  /* ★ 桌面层（Progman 子窗口）专用：不裁快照，让它铺满整个窗口。
+     那个模式下 alpha=0 的像素会变黑，窗口区域（SetWindowRgn）又是 1 位硬裁、
+     圆角全是台阶。改成用快照把圆角外那圈填成"桌面本身"——圆角就只由 .card 的
+     border-radius 做抗锯齿过渡，看不出边缘，也没有锯齿。
+     前提是 #bd 有内容；抓不到快照时主进程会自动退回硬裁（宁可锯齿，不能黑角）。 */
+  body.dlayer #bd{ clip-path:none; }
+  /* 拖动中不藏快照：主进程在起拖时抓了一张"无卡片"的干净全屏快照，
+     拖动中按新位置实时重裁推送（见 main.js dragBegin）。必须垫着它 ——
+     窗口被 region 裁剪后，半透明像素合成不出透明度：快照层一旦缺席，
+     卡片渐变随 --a 变透明、圆角外 alpha=0，全部和黑底混合 ——
+     就是用户报的"拖动时透明/磨砂消失 + 四角黑角"。 */
+  .search input{
+    -webkit-app-region:no-drag;
+    flex:1 1 auto; min-width:0;
+    height:34px;
+    border:0; outline:0; border-radius:11px;
+    padding:0 11px; font-size:13px; font-family:inherit;
+    color:#fff; background:rgba(255,255,255,.12);
+    box-shadow:inset 0 0 0 1px rgba(255,255,255,.14);
+  }
+  .search input::placeholder{ color:rgba(255,255,255,.38); }
+  .res{ margin-top:6px; overflow-y:auto; flex:1 1 auto; }
+  .res .r{
+    -webkit-app-region:no-drag;
+    display:flex; align-items:center; justify-content:space-between; gap:8px;
+    padding:8px 9px; border-radius:10px; cursor:pointer;
+  }
+  .res .r:hover{ background:rgba(255,255,255,.1); }
+  .res .r .n{ font-size:12.5px; }
+  .res .r .m{ font-size:10px; color:rgba(255,255,255,.4); margin-top:1px; }
+  .res .tip{ font-size:11px; color:rgba(255,255,255,.36); padding:9px 4px; }
+  .res::-webkit-scrollbar{ width:0; }
+
+  /* 首次加载态 */
+  .boot{
+    position:absolute; inset:0; z-index:30;
+    display:grid; place-items:center;
+    border-radius:10px;
+    background:linear-gradient(160deg,#1b6fd4,#4a9ef0);
+    font-size:12px; color:rgba(255,255,255,.8);
+    transition:opacity .35s ease;
+  }
+  .boot.hide{ opacity:0; pointer-events:none; }
+</style>
+</head>
+<body data-sky="clear-day">
+
+<div id="bd"></div>
+<div class="card" id="card">
+  <i class="rz rz-tl" data-c="tl"></i>
+  <i class="rz rz-tr" data-c="tr"></i>
+  <i class="rz rz-bl" data-c="bl"></i>
+  <i class="rz rz-br" data-c="br"></i>
+  <div class="tint"></div>
+  <div class="hd">
+    <div class="city" id="cityBtn" title="点击搜索城市">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round">
+        <path d="M12 21s7-6.1 7-11a7 7 0 1 0-14 0c0 4.9 7 11 7 11z"/><circle cx="12" cy="10" r="2.6"/>
+      </svg>
+      <span class="nm" id="cityName">定位中…</span>
+    </div>
+    <div class="acts">
+      <button class="act" id="menuBtn" title="更多（置顶 / 搜索 / 退出）">
+        <svg viewBox="0 0 24 24" fill="currentColor" stroke="none">
+          <circle cx="12" cy="5.2" r="1.9"/><circle cx="12" cy="12" r="1.9"/><circle cx="12" cy="18.8" r="1.9"/>
+        </svg>
+      </button>
+      <button class="act" id="refreshBtn" title="刷新">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M20.5 12a8.5 8.5 0 1 1-2.6-6.1"/><path d="M20.5 4.2V9h-4.8"/>
+        </svg>
+      </button>
+      <button class="act" id="closeBtn" title="关闭">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round">
+          <path d="M6 6l12 12M18 6L6 18"/>
+        </svg>
+      </button>
+    </div>
+  </div>
+
+  <div class="main">
+    <div class="left">
+      <div class="temp"><span id="tNum">--</span><i>°</i></div>
+      <div class="desc" id="desc">正在获取…</div>
+      <div class="range" id="range">&nbsp;</div>
+    </div>
+    <div class="ico" id="ico"></div>
+  </div>
+
+  <div class="hrs" id="hrs"></div>
+  <div class="mets" id="mets"></div>
+  <div class="dys" id="dys"></div>
+
+  <div class="ft">
+    <span id="ftL">—</span>
+    <span class="top" id="ftR"></span>
+  </div>
+</div>
+
+<div class="search" id="search">
+  <div class="srow">
+    <input id="q" type="text" placeholder="搜索城市：上海 / km / Tokyo" autocomplete="off">
+    <button class="sx" id="sxBtn" title="关闭搜索（Esc）">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round">
+        <path d="M6 6l12 12M18 6L6 18"/>
+      </svg>
+    </button>
+  </div>
+  <div class="res" id="res"><div class="tip">输入城市名后回车</div></div>
+</div>
+
+<div class="look" id="look">
+  <div class="lkhd"><span>外观设置</span>
+    <button class="sx" id="lkBtn" title="关闭（Esc）">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round">
+        <path d="M6 6l12 12M18 6L6 18"/>
+      </svg>
+    </button>
+  </div>
+  <label class="lkrow"><span>透明度</span>
+    <input id="lkAlpha" type="range" min="0" max="90" step="1"><b id="lkAlphaV"></b></label>
+  <label class="lkrow"><span>磨砂</span>
+    <input id="lkFrost" type="range" min="0" max="20" step="1"><b id="lkFrostV"></b></label>
+  <div class="lktip">透明度拉高会透出桌面快照；图标挪过 / 换壁纸后，右键 → 刷新桌面背景</div>
+</div>
+
+<div class="boot" id="boot">正在定位…</div>
+
+<script>
+/* ================= preload 缺失时的兜底 =================
+   window.wgt 由 preload 注入。万一它没加载（asar/路径出问题，或直接在浏览器里
+   打开本文件调试），下面任何一句 window.wgt.xxx 都会抛错 —— 整个脚本死掉，
+   卡片退化成静态 HTML：天气不刷新、搜索和拖动全失效，且看不出是哪坏了。
+   这里补一层空实现，最差也只是"变成一张普通网页卡片"。 */
+if (!window.wgt) {
+  const noop = () => {};
+  const on = () => noop;
+  window.wgt = {
+    acrylic: false,
+    dlayer: false,
+    close: noop, menu: noop, raise: noop, rest: noop,
+    dragBegin: noop, dragEnd: noop, scaleStep: noop, searchState: noop,
+    imeBegin: noop, imeEnd: noop,
+    geoIP: () => Promise.resolve([]),
+    backdropNow: () => Promise.resolve(null),
+    getLook: () => Promise.resolve(null),
+    setLook: () => Promise.resolve(true),
+    onSearchExit: on, onRefresh: on, onSearchOpen: on, onRelocate: on,
+    onBackdrop: on, onBdFull: on, onBdPos: on, onBdDragEnd: on,
+    onShowLook: on, onImeText: on, onImeCommit: on, onImeCancel: on, onImeBlur: on,
+  };
+}
+
+/* ================= WMO 天气代码 ================= */
+const WMO = {
+  0:{t:"晴",k:"clear"}, 1:{t:"晴间多云",k:"partly"}, 2:{t:"局部多云",k:"partly"},
+  3:{t:"阴",k:"cloudy"}, 45:{t:"有雾",k:"fog"}, 48:{t:"雾凇",k:"fog"},
+  51:{t:"小毛毛雨",k:"drizzle"}, 53:{t:"毛毛雨",k:"drizzle"}, 55:{t:"大毛毛雨",k:"rain"},
+  56:{t:"冻毛毛雨",k:"rain"}, 57:{t:"强冻毛毛雨",k:"rain"},
+  61:{t:"小雨",k:"rain"}, 63:{t:"中雨",k:"rain"}, 65:{t:"大雨",k:"rain"},
+  66:{t:"冻雨",k:"rain"}, 67:{t:"强冻雨",k:"rain"},
+  71:{t:"小雪",k:"snow"}, 73:{t:"中雪",k:"snow"}, 75:{t:"大雪",k:"snow"}, 77:{t:"雪粒",k:"snow"},
+  80:{t:"小阵雨",k:"rain"}, 81:{t:"阵雨",k:"rain"}, 82:{t:"强阵雨",k:"rain"},
+  85:{t:"小阵雪",k:"snow"}, 86:{t:"强阵雪",k:"snow"},
+  95:{t:"雷阵雨",k:"thunder"}, 96:{t:"雷阵雨伴冰雹",k:"thunder"}, 99:{t:"强雷阵雨伴冰雹",k:"thunder"},
+};
+const wmo = (c) => WMO[c] || { t: "未知", k: "cloudy" };
+
+/* ================= 指标换算 ================= */
+/* 风向：度数 → 8 方位（0° = 正北，顺时针） */
+const DIRS = ["北", "东北", "东", "东南", "南", "西南", "西", "西北"];
+function windDir(deg) {
+  if (!isFinite(deg)) return "";
+  return DIRS[Math.round(((deg % 360) + 360) % 360 / 45) % 8];
+}
+
+/* 蒲福风级（km/h 上限） */
+const BEAUFORT = [1, 5, 11, 19, 28, 38, 49, 61, 74, 88, 102, 117];
+function windLevel(kmh) {
+  if (!isFinite(kmh)) return "";
+  for (let i = 0; i < BEAUFORT.length; i++) if (kmh < BEAUFORT[i]) return i + "级";
+  return "12级";
+}
+
+/* 紫外线分级（WHO） */
+function uvLevel(uv) {
+  if (!isFinite(uv)) return null;
+  if (uv < 3) return { t: "弱", c: "u1" };
+  if (uv < 6) return { t: "中等", c: "u2" };
+  if (uv < 8) return { t: "强", c: "u3" };
+  if (uv < 11) return { t: "很强", c: "u4" };
+  return { t: "极强", c: "u5" };
+}
+
+/* 中国 AQI（HJ 633-2012）：各污染物 IAQI 取最大。
+   Open-Meteo 只给美标 us_aqi，跟国产 App 的「优/良」对不上，所以本地按国标重算。 */
+const BP_PM25 = [[0,35,0,50],[35,75,50,100],[75,115,100,150],[115,150,150,200],[150,250,200,300],[250,350,300,400],[350,500,400,500]];
+const BP_PM10 = [[0,50,0,50],[50,150,50,100],[150,250,100,150],[250,350,150,200],[350,420,200,300],[420,500,300,400],[500,600,400,500]];
+/* ★ O₃ 用的是 HJ 633-2012 表 1 里「臭氧 1 小时平均」那一行（0/160/200/300/400/800/1000/1200）。
+   原来错用了「臭氧 8 小时滑动平均」那一行（0/100/160/215/265/800），而喂进来的
+   air.ozone 是 Open-Meteo 的**单小时瞬时浓度**，不是 8 小时均值 —— 口径不对等，
+   短时峰值会被放大：O₃=120 μg/m³ 时 8h 表算出 IAQI 67（良），国标 1h 口径是 37.5（优）。
+   若以后要改成 8h 口径，得先把小时序列做滑动平均，别直接换表。 */
+const BP_O3   = [[0,160,0,50],[160,200,50,100],[200,300,100,150],[300,400,150,200],[400,800,200,300],[800,1000,300,400],[1000,1200,400,500]];
+
+function iaqi(conc, bp) {
+  if (!isFinite(conc) || conc < 0) return 0;
+  for (let i = 0; i < bp.length; i++) {
+    const [cl, ch, il, ih] = bp[i];
+    if (conc <= ch) return il + (ih - il) * (Math.max(conc, cl) - cl) / (ch - cl);
+  }
+  return 500;
+}
+
+function cnAqi(air) {
+  if (!air) return null;
+  /* ★ 三个污染物全缺时不能报「优」——那是"没数据"，不是"空气好"。
+     （isFinite(null) 是 true，null 会被 iaqi 当成 0，所以这里得单独判一次。） */
+  if (![air.pm2_5, air.pm10, air.ozone].some((v) => typeof v === "number" && isFinite(v))) return null;
+  const v = Math.max(
+    iaqi(air.pm2_5, BP_PM25),
+    iaqi(air.pm10, BP_PM10),
+    iaqi(air.ozone, BP_O3)
+  );
+  const aqi = Math.round(v);
+  const lv =
+    aqi <= 50  ? { t: "优",     c: "q1" } :
+    aqi <= 100 ? { t: "良",     c: "q2" } :
+    aqi <= 150 ? { t: "轻度污染", c: "q3" } :
+    aqi <= 200 ? { t: "中度污染", c: "q4" } :
+    aqi <= 300 ? { t: "重度污染", c: "q5" } : { t: "严重污染", c: "q6" };
+  lv.aqi = aqi;
+  return lv;
+}
+
+/* 指标小图标 */
+const MET_ICON = {
+  air: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19c0-8 4.5-13 15-14 .6 6.5-2 14-9 14.5-2.6.2-6-.5-6-.5z"/><path d="M8 20c1.2-4.6 3.6-7.6 7.4-9.6"/></svg>',
+  wind: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8h9.5a2.8 2.8 0 1 0-2.8-2.8"/><path d="M3 15.5h12.8a2.6 2.6 0 1 1-2.6 2.6"/><path d="M3 11.8h6.2"/></svg>',
+  uv:  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2.6v2.2M12 19.2v2.2M4.3 4.3l1.6 1.6M18.1 18.1l1.6 1.6M2.6 12h2.2M19.2 12h2.2M4.3 19.7l1.6-1.6M18.1 5.9l1.6-1.6"/></svg>',
+};
+
+/* ================= 图标 ================= */
+let uid = 0;
+const nid = (p) => p + (++uid);
+
+function sunPart(cx, cy, r, gid) {
+  let rays = "";
+  for (let i = 0; i < 8; i++) {
+    rays += '<line x1="0" y1="' + (-(r + 3.2)) + '" x2="0" y2="' + (-(r + 7.4)) +
+      '" transform="rotate(' + (i * 45) + ')" stroke="#FFC94D" stroke-width="' +
+      Math.max(2.6, r * 0.3).toFixed(1) + '" stroke-linecap="round" opacity=".95"/>';
+  }
+  return '<g transform="translate(' + cx + ',' + cy + ')"><circle r="' + r +
+    '" fill="url(#' + gid + ')"/>' + rays + '</g>';
+}
+function moonPath(r) {
+  const r2 = r * 1.28;
+  return 'M0,' + (-r) + ' A' + r + ',' + r + ' 0 1,0 0,' + r +
+         ' A' + r2.toFixed(1) + ',' + r2.toFixed(1) + ' 0 0,1 0,' + (-r) + ' Z';
+}
+function moonPart(cx, cy, r, gid, rot) {
+  return '<g transform="translate(' + cx + ',' + cy + ') rotate(' + (rot === undefined ? -18 : rot) + ')">' +
+    '<path d="' + moonPath(r) + '" fill="url(#' + gid + ')"/></g>';
+}
+function cloudPart(cx, cy, s, gid) {
+  return '<g transform="translate(' + cx + ',' + cy + ') scale(' + s + ')">' +
+    '<circle cx="-9" cy="8" r="10.5" fill="url(#' + gid + ')"/>' +
+    '<circle cx="6" cy="2" r="13.6" fill="url(#' + gid + ')"/>' +
+    '<rect x="-9" y="8" width="24.6" height="10.5" rx="5.25" fill="url(#' + gid + ')"/></g>';
+}
+function defsSun(g) {
+  return '<radialGradient id="' + g + '" cx="36%" cy="30%" r="76%">' +
+    '<stop offset="0" stop-color="#FFE98A"/><stop offset="55%" stop-color="#FFCE47"/>' +
+    '<stop offset="1" stop-color="#FF9E1B"/></radialGradient>';
+}
+function defsMoon(g) {
+  return '<linearGradient id="' + g + '" x1="0" y1="0" x2="1" y2="1">' +
+    '<stop offset="0" stop-color="#FBFDFF"/><stop offset="1" stop-color="#B7CDE9"/></linearGradient>';
+}
+function defsCloud(g, top, bottom) {
+  return '<linearGradient id="' + g + '" gradientUnits="userSpaceOnUse" x1="0" y1="-12" x2="0" y2="19">' +
+    '<stop offset="0" stop-color="' + (top || "#FFFFFF") + '"/>' +
+    '<stop offset="1" stop-color="' + (bottom || "#C2D3E4") + '"/></linearGradient>';
+}
+
+function svgIcon(kind, isDay) {
+  const sun = nid("s"), moon = nid("m"), cl = nid("c"), cl2 = nid("c");
+  let defs = "", inner = "";
+  const CT = "#FFFFFF", CB = "#C0D1E2", CT2 = "#DCE8F3", CB2 = "#9FB3C7";
+
+  switch (kind) {
+    case "clear":
+      if (isDay) { defs = defsSun(sun); inner = sunPart(32, 32, 13, sun); }
+      else {
+        defs = defsMoon(moon);
+        inner = moonPart(31, 33, 17.5, moon, -16) +
+          '<circle cx="47" cy="17" r="1.6" fill="#fff" opacity=".9"/>' +
+          '<circle cx="14" cy="20" r="1.1" fill="#fff" opacity=".65"/>' +
+          '<circle cx="52" cy="46" r="1.2" fill="#fff" opacity=".55"/>';
+      }
+      break;
+    case "partly":
+      defs = defsSun(sun) + defsMoon(moon) + defsCloud(cl, CT, CB);
+      inner = (isDay ? sunPart(23, 21, 9.6, sun) : moonPart(25, 22, 11, moon, -16)) +
+        cloudPart(37, 36, 0.86, cl);
+      break;
+    case "cloudy":
+      defs = defsCloud(cl, CT, CB) + defsCloud(cl2, CT2, CB2);
+      inner = cloudPart(27, 25, 0.72, cl2) + cloudPart(36, 40, 0.95, cl);
+      break;
+    case "fog":
+      defs = defsCloud(cl, CT, CB);
+      inner = cloudPart(32, 26, 0.86, cl) +
+        '<g stroke="#DDE9F4" stroke-width="4" stroke-linecap="round" opacity=".92">' +
+        '<line x1="15" y1="45" x2="49" y2="45"/><line x1="20" y1="52" x2="44" y2="52"/>' +
+        '<line x1="15" y1="59" x2="43" y2="59"/></g>';
+      break;
+    case "drizzle":
+      defs = defsCloud(cl, CT, CB);
+      inner = cloudPart(32, 24, 0.9, cl) +
+        '<g stroke="#79D2F7" stroke-width="3.6" stroke-linecap="round">' +
+        '<line x1="22" y1="45" x2="20.4" y2="50"/><line x1="32" y1="45" x2="30.4" y2="50"/>' +
+        '<line x1="42" y1="45" x2="40.4" y2="50"/></g>';
+      break;
+    case "rain":
+      defs = defsCloud(cl, CT, CB);
+      inner = cloudPart(32, 23, 0.92, cl) +
+        '<g stroke="#6BCBF6" stroke-width="3.9" stroke-linecap="round">' +
+        '<line x1="21" y1="44" x2="17.6" y2="54"/><line x1="32" y1="44" x2="28.6" y2="54"/>' +
+        '<line x1="43" y1="44" x2="39.6" y2="54"/></g>';
+      break;
+    case "snow":
+      defs = defsCloud(cl, CT, CB);
+      inner = cloudPart(32, 23, 0.92, cl) +
+        '<g fill="#EAF6FF"><circle cx="21" cy="48" r="2.9"/><circle cx="32" cy="54" r="2.9"/>' +
+        '<circle cx="43" cy="48" r="2.9"/><circle cx="26.5" cy="58" r="2.2"/>' +
+        '<circle cx="38" cy="58" r="2.2"/></g>';
+      break;
+    case "thunder":
+      defs = defsCloud(cl, "#D7E3EF", "#8FA6BC");
+      inner = cloudPart(32, 22, 0.92, cl) +
+        '<path d="M34.5 38 L24 53 h7.2 l-4 10 L40 48 h-7.4 Z" fill="#FFD60A"/>';
+      break;
+    default:
+      defs = defsCloud(cl, CT, CB);
+      inner = cloudPart(32, 32, 1, cl);
+  }
+
+  return '<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">' +
+    '<defs>' + defs + '</defs>' + inner + '</svg>';
+}
+
+/* ================= 工具 ================= */
+const pad2 = (n) => String(n).padStart(2, "0");
+const $ = (id) => document.getElementById(id);
+const escapeHTML = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) =>
+  ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+function fetchJSON(url, ms) {
+  const ac = new AbortController();
+  const to = setTimeout(() => ac.abort(), ms || 9000);
+  return fetch(url, { signal: ac.signal, cache: "no-store" })
+    .then((r) => { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
+    .finally(() => clearTimeout(to));
+}
+
+const WEEK = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
+function dayLabel(dateStr, idx) {
+  if (idx === 0) return "今天";
+  if (idx === 1) return "明天";
+  const d = new Date(dateStr + "T00:00:00");
+  return isNaN(d.getTime()) ? dateStr.slice(5) : WEEK[d.getDay()];
+}
+function hhmm(ts) {
+  const d = new Date(ts);
+  return pad2(d.getHours()) + ":" + pad2(d.getMinutes());
+}
+
+function applySky(kind, isDay) {
+  let key;
+  if (kind === "clear") key = isDay ? "clear-day" : "clear-night";
+  else if (kind === "partly") key = isDay ? "partly-day" : "partly-night";
+  else if (kind === "cloudy") key = "cloudy";
+  else if (kind === "fog") key = "fog";
+  else if (kind === "drizzle") key = "drizzle";
+  else if (kind === "rain") key = "rain";
+  else if (kind === "snow") key = "snow";
+  else if (kind === "thunder") key = "thunder";
+  else key = isDay ? "partly-day" : "partly-night";
+  if (document.body.dataset.sky !== key) document.body.dataset.sky = key;
+}
+
+/* ================= 定位 ================= */
+const DEFAULT_CITY = { name: "北京", lat: 39.9042, lon: 116.4074 };
+const STORE_KEY = "wgt_place_v2";      /* 用户手动选定的城市 */
+const AUTO_KEY  = "wgt_auto_v3";       /* 上次自动定位的结果 */
+const AUTO_FRESH_MS = 30 * 60 * 1000;  /* 30 分钟内不重复定位，超过就重新探一次（笔记本换地方能跟上） */
+
+/* 本机时区，用来识别"出口 IP 在境外"（开了代理/VPN 时 IP 定位会跑到国外） */
+const LOCAL_TZ = (() => {
+  try { return Intl.DateTimeFormat().resolvedOptions().timeZone || ""; } catch (e) { return ""; }
+})();
+
+function geoBrowser(timeout) {
+  return new Promise((resolve, reject) => {
+    if (!navigator.geolocation) return reject(new Error("no-geo"));
+    navigator.geolocation.getCurrentPosition(
+      (p) => resolve({ lat: p.coords.latitude, lon: p.coords.longitude }),
+      (e) => reject(e),
+      { enableHighAccuracy: false, timeout: timeout || 2500, maximumAge: 10 * 60 * 1000 }
+    );
+  });
+}
+
+const IP_SOURCES = [
+  {
+    id: "ip.sb",
+    url: "https://api.ip.sb/geoip",
+    ms: 3500,
+    pick: (d) => (d && d.latitude != null) ? {
+      lat: d.latitude, lon: d.longitude, city: d.city,
+      tz: d.timezone || "", cc: d.country_code || "",
+    } : null,
+  },
+  {
+    id: "ipwho",
+    url: "https://ipwho.is/?lang=zh-CN",
+    ms: 3500,
+    pick: (d) => (d && d.success !== false && d.latitude != null) ? {
+      lat: d.latitude, lon: d.longitude, city: d.city || d.region,
+      tz: (d.timezone && d.timezone.id) || "", cc: d.country_code || "",
+    } : null,
+  },
+];
+
+function sameArea(a, b) {
+  /* 粗判是否同一地区：纬度经度都在 1 度（约 110km）内 */
+  return Math.abs(a.lat - b.lat) < 1 && Math.abs(a.lon - b.lon) < 1;
+}
+
+async function queryIPRaw() {
+  /* 首选主进程查询：Node 网络栈直连，不跟随 Windows 系统代理。
+     渲染进程的 fetch 会跟随系统代理，机器上挂代理/VPN 时 IP 会落到境外出口。 */
+  if (window.wgt && window.wgt.geoIP) {
+    try {
+      const list = await window.wgt.geoIP();
+      if (list && list.length) return list;
+    } catch (e) { /* 主进程不可用时退到下方直连 */ }
+  }
+
+  const all = await Promise.all(IP_SOURCES.map((src) =>
+    fetchJSON(src.url, src.ms)
+      .then((d) => {
+        const v = src.pick(d);
+        return v ? Object.assign({ src: src.id }, v) : null;
+      })
+      .catch(() => null)
+  ));
+  return all.filter(Boolean);
+}
+
+async function geoIP() {
+  const ok = await queryIPRaw();
+  if (!ok.length) throw new Error("ip-all-failed");
+
+  /* 主源（ip.sb）实测比 ipwho 准，两者给出不同城市时以主源为准；
+     主源没响应时，结果不可交叉验证，标为低可信，让界面如实提示 */
+  const PRIMARY = "ip.sb";
+  const fromPrimary = (r) => r && r.src === PRIMARY;
+
+  /* ip.sb 给的是英文城市名（Kunming），ipwho 带 lang=zh-CN 给中文（昆明）。
+     选了哪个源都能借同地区的 ipwho 名字，避免卡片上出现英文地名 */
+  const withZhName = (chosen) => {
+    if (!chosen || chosen.src === "ipwho") return chosen;
+    const zh = ok.find((r) => r.src === "ipwho" && r.city && sameArea(r, chosen));
+    return zh ? Object.assign({}, chosen, { city: zh.city }) : chosen;
+  };
+
+  /* 1) 时区与本机一致的优先 —— 这条能挡掉「出口 IP 在伦敦」这类误判 */
+  if (LOCAL_TZ) {
+    const tzHit = ok.filter((r) => r.tz && r.tz === LOCAL_TZ);
+    if (tzHit.length) {
+      const top = tzHit.find((a) => tzHit.filter((b) => sameArea(a, b)).length >= 2)
+        || tzHit.find(fromPrimary)
+        || tzHit[0];
+      if (!fromPrimary(top)) top.lowConfidence = true;
+      return withZhName(top);
+    }
+  }
+
+  /* 2) 没有时区命中时，看哪个坐标被更多来源支持 */
+  let best = ok[0], bestScore = 0;
+  ok.forEach((a) => {
+    const score = ok.filter((b) => sameArea(a, b)).length;
+    if (score > bestScore) { best = a; bestScore = score; }
+  });
+  if (bestScore >= 2) return withZhName(best);
+
+  /* 两个来源互相矛盾时，用主源的 */
+  if (ok.some(fromPrimary)) return withZhName(ok.find(fromPrimary));
+
+  /* 3) 都不一致：时区不符说明可能挂着代理，仍用第一个可用结果，但标记低可信 */
+  return withZhName(Object.assign({ lowConfidence: true }, ok[0]));
+}
+
+async function reverseName(lat, lon, fallback, ms) {
+  try {
+    /* ★ 默认超时 9 秒。这个接口实测要 8 秒左右，原来给 2500ms 等于必然放弃 ——
+       "英文城市名回填中文名"这条路径实际上从来没成功过。 */
+    const d = await fetchJSON(
+      "https://api-bdc.io/data/reverse-geocode-client?latitude=" + lat +
+      "&longitude=" + lon + "&localityLanguage=zh-Hans", ms || 9000);
+    const city = d.city || d.locality || d.principalSubdivision;
+    if (city) return String(city).replace(/市$/, "");
+  } catch (e) { /* 降级 */ }
+  return fallback || "当前位置";
+}
+
+function readJSON(key) {
+  try { return JSON.parse(localStorage.getItem(key) || "null"); } catch (e) { return null; }
+}
+function writeJSON(key, v) {
+  try { localStorage.setItem(key, JSON.stringify(v)); } catch (e) {}
+}
+
+const readManual = () => readJSON(STORE_KEY);
+const writeManual = (v) => writeJSON(STORE_KEY, v);
+const readAuto = () => readJSON(AUTO_KEY);
+const writeAuto = (v) => writeJSON(AUTO_KEY, v);
+
+async function resolvePlace(forceDetect) {
+  /* 手动选定的城市优先级最高，除非用户主动要求重新定位 */
+  const manual = readManual();
+  if (manual && !forceDetect) return Object.assign({ manual: true }, manual);
+
+  /* ★ 自动定位结果跨启动缓存 30 分钟。
+     原来 readAuto/writeAuto 是死代码（只定义了、从没被调用），每次冷启动都要
+     重新跑一遍系统定位 + 两个 IP 请求，README 承诺的"定位结果缓存 30 分钟"不成立。
+     现在写进 localStorage，冷启动直接命中；超过 30 分钟或用户点「回到自动定位」
+     （forceDetect）才走完整探测。 */
+  if (!forceDetect) {
+    const cached = readAuto();
+    if (cached && isFinite(cached.lat) && isFinite(cached.lon) &&
+        Date.now() - (cached.at || 0) < AUTO_FRESH_MS) {
+      return Object.assign({ manual: false }, cached);
+    }
+  }
+
+  /* 系统定位和 IP 定位同时发起，不串行等待。
+     ★ 两边都只负责"拿坐标"，城市名一律留给 refineName 在后台补：
+       反向地理编码（api-bdc.io）实测要 8 秒，原来串在 geoP 里 await、超时又只给
+       2.5 秒 —— 必然是"干等 2.5 秒然后放弃"，白等还拖首屏。 */
+  const geoP = geoBrowser(2500)
+    .then((p) => ({ lat: p.lat, lon: p.lon, precise: true, name: "" }))
+    .catch(() => null);
+
+  const ipP = geoIP()
+    .then((ip) => ({
+      lat: ip.lat, lon: ip.lon, precise: false,
+      lowConfidence: !!ip.lowConfidence, src: ip.src,
+      /* IP 接口本身就带城市名（ipwho 给中文），有就直接用，省掉一次反向编码 */
+      name: ip.city ? String(ip.city).replace(/市$/, "") : "",
+    }))
+    .catch(() => null);
+
+  const results = await Promise.all([geoP, ipP]);
+  const geo = results[0];
+  const ip = results[1];
+
+  /* 选谁：
+     1) IP 结果且时区与本机一致 —— 最可信，优先；
+     2) IP 不可信（时区对不上，说明出口在境外）时，才用系统定位；
+     3) 都没有就退到低可信的 IP 结果。 */
+  let auto = null;
+  if (ip && !ip.lowConfidence) auto = ip;
+  else if (geo) auto = geo;
+  else if (ip) auto = ip;
+
+  if (auto) {
+    const place = {
+      manual: false, lat: auto.lat, lon: auto.lon, name: auto.name,
+      precise: !!auto.precise, lowConfidence: !!auto.lowConfidence, at: Date.now(),
+    };
+    writeAuto(place);       /* 落盘，下次冷启动直接命中 */
+    return place;
+  }
+
+  return {
+    lat: DEFAULT_CITY.lat, lon: DEFAULT_CITY.lon,
+    name: DEFAULT_CITY.name, manual: false, isDefault: true,
+  };
+}
+
+/* ================= 天气数据 ================= */
+async function loadWeather(lat, lon) {
+  const params = [
+    "latitude=" + lat.toFixed(4),
+    "longitude=" + lon.toFixed(4),
+    "current=temperature_2m,apparent_temperature,is_day,weather_code,relative_humidity_2m,wind_speed_10m,wind_direction_10m",
+    "hourly=temperature_2m,weather_code,is_day,uv_index",
+    "daily=weather_code,temperature_2m_max,temperature_2m_min,uv_index_max",
+    "timezone=auto",
+    "forecast_days=4",
+    "wind_speed_unit=kmh",
+  ].join("&");
+  return fetchJSON("https://api.open-meteo.com/v1/forecast?" + params, 12000);
+}
+
+/* 空气质量：独立接口，失败不影响主卡片 */
+async function loadAir(lat, lon) {
+  const params = [
+    "latitude=" + lat.toFixed(4),
+    "longitude=" + lon.toFixed(4),
+    "current=pm2_5,pm10,ozone,us_aqi",
+    "timezone=auto",
+  ].join("&");
+  return fetchJSON("https://air-quality-api.open-meteo.com/v1/air-quality?" + params, 9000);
+}
+
+/* ================= 渲染 ================= */
+const state = { place: null, data: null, air: null, lastUpdate: 0, loading: false, timer: null };
+
+function render() {
+  const d = state.data;
+  if (!d || !d.current) return;
+
+  const cur = d.current;
+  const isDay = cur.is_day === 1;
+  const info = wmo(cur.weather_code);
+  applySky(info.k, isDay);
+
+  $("cityName").textContent = state.place.name || "当前位置";
+  $("tNum").textContent = Math.round(cur.temperature_2m);
+  $("desc").textContent = info.t;
+
+  const daily = d.daily;
+  const hi = Math.round(daily.temperature_2m_max[0]);
+  const lo = Math.round(daily.temperature_2m_min[0]);
+  $("range").textContent = "最高 " + hi + "° · 最低 " + lo + "° · 体感 " + Math.round(cur.apparent_temperature) + "°";
+
+  $("ico").innerHTML = svgIcon(info.k, isDay);
+
+  /* ---- 未来 5 小时 ---- */
+  const times = d.hourly.time;
+  const nowISO = cur.time;
+  let startIdx = times.indexOf(nowISO);
+  if (startIdx < 0) {
+    startIdx = 0;
+    for (let i = 0; i < times.length; i++) {
+      if (times[i] <= nowISO) startIdx = i; else break;
+    }
+  }
+  const n = Math.min(5, times.length - startIdx);
+  let hs = "";
+  for (let i = 0; i < n; i++) {
+    const idx = startIdx + i;
+    const isNow = i === 0;  // current.time 是 15 分钟精度，首格必须用真实当前值
+    const code = isNow ? cur.weather_code : d.hourly.weather_code[idx];
+    const hDay = isNow ? isDay : d.hourly.is_day[idx] === 1;
+    const hInfo = wmo(code);
+    const t = Math.round(isNow ? cur.temperature_2m : d.hourly.temperature_2m[idx]);
+    const label = isNow ? "现在" : pad2(parseInt(times[idx].slice(11, 13), 10)) + "时";
+    hs += '<div class="hr' + (isNow ? " now" : "") + '">' +
+      '<div class="t">' + label + '</div>' +
+      '<div class="i">' + svgIcon(hInfo.k, hDay) + '</div>' +
+      '<div class="v">' + t + '°</div></div>';
+  }
+  $("hrs").innerHTML = hs;
+
+  /* ---- 指标条：空气质量 / 风 / 紫外线 ---- */
+  /* 空气是慢接口、且可能属于上一个城市，坐标不吻合就不采用 */
+  const a = state.air;
+  const airCur = (a && state.place &&
+    Math.abs(a.lat - state.place.lat) < 0.02 &&
+    Math.abs(a.lon - state.place.lon) < 0.02) ? a.cur : null;
+  const aqi = cnAqi(airCur);
+  const wd = windDir(cur.wind_direction_10m);
+  const wl = windLevel(cur.wind_speed_10m);
+  /* 紫外线取「当前小时」而非日峰值：夜间理应显示弱，跟手机习惯一致；
+     今日峰值放进 title，需要时悬停可看 */
+  const uvNow = d.hourly.uv_index ? d.hourly.uv_index[startIdx] : NaN;
+  const uv = uvLevel(uvNow);
+  const uvPeak = daily.uv_index_max && daily.uv_index_max[0];
+  const uvPeakLv = uvLevel(uvPeak);
+  const uvTitle = isFinite(uvPeak)
+    ? "当前 " + (isFinite(uvNow) ? uvNow.toFixed(1) : "—") +
+      " · 今日峰值 " + uvPeak.toFixed(1) + (uvPeakLv ? "（" + uvPeakLv.t + "）" : "")
+    : "";
+
+  $("mets").innerHTML =
+    '<div class="met" title="' + (aqi ? "中国 AQI " + aqi.aqi + "（PM2.5 " + escapeHTML(airCur.pm2_5) + " μg/m³）" : "空气质量暂无数据") + '">' + MET_ICON.air +
+      '<span class="lb">空气</span><span class="vl ' + (aqi ? aqi.c : "") + '">' +
+      (aqi ? aqi.t : "—") + '</span></div>' +
+    '<div class="met" title="' + (isFinite(cur.wind_speed_10m) ? cur.wind_speed_10m.toFixed(1) + " km/h · " + Math.round(cur.wind_direction_10m) + "°" : "") + '">' + MET_ICON.wind +
+      '<span class="lb">' + (wd ? wd + "风" : "风") + '</span><span class="vl">' + (wl || "—") + '</span></div>' +
+    '<div class="met" title="' + uvTitle + '">' + MET_ICON.uv +
+      '<span class="lb">紫外线</span><span class="vl ' + (uv ? uv.c : "") + '">' +
+      (uv ? uv.t : "—") + '</span></div>';
+
+  /* ---- 未来 3 天 ---- */
+  const wMin = Math.min.apply(null, daily.temperature_2m_min);
+  const wMax = Math.max.apply(null, daily.temperature_2m_max);
+  const span = Math.max(1, wMax - wMin);
+
+  let rs = "";
+  for (let i = 0; i < Math.min(3, daily.time.length); i++) {
+    const di = wmo(daily.weather_code[i]);
+    const dLo = daily.temperature_2m_min[i];
+    const dHi = daily.temperature_2m_max[i];
+
+    /* 温度条：外层裁出这天在整周温标里的区间，内层铺满整周渐变 */
+    let left = ((dLo - wMin) / span) * 100;
+    let w = ((dHi - dLo) / span) * 100;
+    if (w < 6) { left = Math.max(0, left - (6 - w) / 2); w = 6; }
+    const inner = (100 / w) * 100;
+    const innerLeft = -(left / w) * 100;
+
+    rs += '<div class="drow">' +
+      '<div class="dn">' + dayLabel(daily.time[i], i) + '</div>' +
+      '<div class="di">' + svgIcon(di.k, true) + '</div>' +
+      '<div class="bar"><span style="left:' + left.toFixed(2) + '%;width:' + w.toFixed(2) + '%">' +
+        '<i style="left:' + innerLeft.toFixed(2) + '%;width:' + inner.toFixed(2) + '%"></i>' +
+      '</span></div>' +
+      '<div class="dlo">' + Math.round(dLo) + '°</div>' +
+      '<div class="dhi">' + Math.round(dHi) + '°</div>' +
+      '</div>';
+  }
+  $("dys").innerHTML = rs;
+
+  $("ftL").textContent = "更新于 " + hhmm(state.lastUpdate);
+  const p = state.place;
+  $("ftR").textContent = p.manual ? "已固定"
+    : p.precise ? "精确定位"
+    : p.stale ? "沿用上次定位"
+    : p.isDefault ? "未定位成功"
+    : p.lowConfidence ? "网络定位·可能不准"
+    : "网络定位";
+}
+
+/* ================= 启动 / 刷新 ================= */
+
+/* IP 主源给的城市名是英文（Kunming），副源超时没回来时就没法借中文名。
+   这里在后台补一次反向地理编码，拿到中文名再刷一次界面 —— 不挡首屏。 */
+function refineName(place) {
+  if (!place || place.manual) return;
+  if (place.name && /[\u4e00-\u9fa5]/.test(place.name)) return;   /* 已经是中文，不用折腾 */
+  const origin = place.name || "";
+  reverseName(place.lat, place.lon, origin, 9000).then((n) => {
+    if (!n || n === origin) return;
+    /* ★ 这几秒里用户可能已经换了城市（或点了「回到自动定位」）。只在
+       "卡片当前还是这一个 place 对象"时才回填，否则会把 state.place 覆写回
+       旧城市 —— 表现是「新城市的数据 + 旧城市的名字」。 */
+    if (state.place !== place) return;
+    place.name = n;
+    render();
+    if (!place.manual) writeAuto(Object.assign({}, place));   /* 中文名也进缓存 */
+  }).catch(() => {});
+}
+/* 空气是独立慢接口：先让主卡片出来，数据到了再补一次渲染，不拖首屏 */
+function refreshAir(place) {
+  const lat = place.lat, lon = place.lon;
+  return loadAir(lat, lon).then((r) => {
+    if (!r || !r.current) return;
+    state.air = { lat: lat, lon: lon, cur: r.current };
+    if (state.data) render();
+  }).catch(() => {});
+}
+async function boot(forceLocate) {
+  if (state.loading) return;
+  state.loading = true;
+  const rb = $("refreshBtn");
+  rb.classList.add("spin");
+
+  try {
+    if (forceLocate) state.place = null;
+
+    let place = state.place;
+    if (!place) {
+      if (forceLocate) {
+        try {
+          localStorage.removeItem(STORE_KEY);   /* 清掉手动选定 */
+          localStorage.removeItem(AUTO_KEY);    /* 也要清掉自动定位缓存，否则会被 30 分钟缓存顶回去 */
+        } catch (e) {}
+      }
+      place = await resolvePlace(forceLocate);
+      state.place = place;
+    }
+
+    const data = await loadWeather(place.lat, place.lon);
+    state.data = data;
+    state.lastUpdate = Date.now();
+    render();
+    refineName(state.place);
+    refreshAir(state.place);
+
+    $("boot").classList.add("hide");
+
+    clearInterval(state.timer);
+    state.timer = setInterval(() => {
+      /* 没手动固定、且上次定位超过 30 分钟 → 清空让它重新识别位置 */
+      const cur = state.place;
+      if (cur && !cur.manual && Date.now() - (cur.at || 0) > AUTO_FRESH_MS) {
+        state.place = null;
+      }
+      boot(false);
+    }, 10 * 60 * 1000);
+  } catch (e) {
+    if (state.data) {
+      $("ftL").textContent = "刷新失败 · 显示 " + hhmm(state.lastUpdate) + " 数据";
+    } else {
+      $("boot").textContent = "拿不到天气，点右上角重试";
+      setTimeout(() => $("boot").classList.add("hide"), 2600);
+    }
+  } finally {
+    state.loading = false;
+    rb.classList.remove("spin");
+  }
+}
+
+/* ================= 城市搜索 ================= */
+/* —— 内置拼音表：支持「km」（首字母）/「kunming」（全拼）搜中国城市 ——
+   只存 [中文名, 全拼(空格分音节)]，首字母与连写拼音运行时算出。
+   表只用来「展开查询词」，坐标与行政区信息仍由 geocoding API 提供，不本地存坐标。 */
+const PYCITY = [
+  ["北京","bei jing"],["上海","shang hai"],["天津","tian jin"],["重庆","chong qing"],
+  ["广州","guang zhou"],["深圳","shen zhen"],["珠海","zhu hai"],["汕头","shan tou"],["佛山","fo shan"],
+  ["韶关","shao guan"],["湛江","zhan jiang"],["肇庆","zhao qing"],["江门","jiang men"],["茂名","mao ming"],
+  ["惠州","hui zhou"],["梅州","mei zhou"],["汕尾","shan wei"],["河源","he yuan"],["阳江","yang jiang"],
+  ["清远","qing yuan"],["东莞","dong guan"],["中山","zhong shan"],["潮州","chao zhou"],["揭阳","jie yang"],["云浮","yun fu"],
+  ["南京","nan jing"],["苏州","su zhou"],["无锡","wu xi"],["常州","chang zhou"],["镇江","zhen jiang"],
+  ["南通","nan tong"],["扬州","yang zhou"],["泰州","tai zhou"],["徐州","xu zhou"],["连云港","lian yun gang"],
+  ["淮安","huai an"],["盐城","yan cheng"],["宿迁","su qian"],
+  ["杭州","hang zhou"],["宁波","ning bo"],["温州","wen zhou"],["嘉兴","jia xing"],["湖州","hu zhou"],
+  ["绍兴","shao xing"],["金华","jin hua"],["衢州","qu zhou"],["舟山","zhou shan"],["台州","tai zhou"],["丽水","li shui"],
+  ["济南","ji nan"],["青岛","qing dao"],["淄博","zi bo"],["枣庄","zao zhuang"],["东营","dong ying"],
+  ["烟台","yan tai"],["潍坊","wei fang"],["济宁","ji ning"],["泰安","tai an"],["威海","wei hai"],
+  ["日照","ri zhao"],["临沂","lin yi"],["德州","de zhou"],["聊城","liao cheng"],["滨州","bin zhou"],["菏泽","he ze"],
+  ["郑州","zheng zhou"],["开封","kai feng"],["洛阳","luo yang"],["平顶山","ping ding shan"],["安阳","an yang"],
+  ["鹤壁","he bi"],["新乡","xin xiang"],["焦作","jiao zuo"],["濮阳","pu yang"],["许昌","xu chang"],
+  ["漯河","luo he"],["三门峡","san men xia"],["南阳","nan yang"],["商丘","shang qiu"],["信阳","xin yang"],
+  ["周口","zhou kou"],["驻马店","zhu ma dian"],
+  ["武汉","wu han"],["黄石","huang shi"],["十堰","shi yan"],["宜昌","yi chang"],["襄阳","xiang yang"],
+  ["鄂州","e zhou"],["荆门","jing men"],["孝感","xiao gan"],["荆州","jing zhou"],["黄冈","huang gang"],
+  ["咸宁","xian ning"],["随州","sui zhou"],["恩施","en shi"],["仙桃","xian tao"],["潜江","qian jiang"],["天门","tian men"],
+  ["长沙","chang sha"],["株洲","zhu zhou"],["湘潭","xiang tan"],["衡阳","heng yang"],["邵阳","shao yang"],
+  ["岳阳","yue yang"],["常德","chang de"],["张家界","zhang jia jie"],["益阳","yi yang"],["郴州","chen zhou"],
+  ["永州","yong zhou"],["怀化","huai hua"],["娄底","lou di"],["湘西","xiang xi"],
+  ["石家庄","shi jia zhuang"],["唐山","tang shan"],["秦皇岛","qin huang dao"],["邯郸","han dan"],["邢台","xing tai"],
+  ["保定","bao ding"],["张家口","zhang jia kou"],["承德","cheng de"],["沧州","cang zhou"],["廊坊","lang fang"],["衡水","heng shui"],
+  ["太原","tai yuan"],["大同","da tong"],["阳泉","yang quan"],["长治","chang zhi"],["晋城","jin cheng"],
+  ["朔州","shuo zhou"],["晋中","jin zhong"],["运城","yun cheng"],["忻州","xin zhou"],["临汾","lin fen"],["吕梁","lv liang"],
+  ["呼和浩特","hu he hao te"],["包头","bao tou"],["乌海","wu hai"],["赤峰","chi feng"],["通辽","tong liao"],
+  ["鄂尔多斯","e er duo si"],["呼伦贝尔","hu lun bei er"],["巴彦淖尔","ba yan nao er"],["乌兰察布","wu lan cha bu"],
+  ["沈阳","shen yang"],["大连","da lian"],["鞍山","an shan"],["抚顺","fu shun"],["本溪","ben xi"],
+  ["丹东","dan dong"],["锦州","jin zhou"],["营口","ying kou"],["阜新","fu xin"],["辽阳","liao yang"],
+  ["盘锦","pan jin"],["铁岭","tie ling"],["朝阳","chao yang"],["葫芦岛","hu lu dao"],
+  ["长春","chang chun"],["吉林","ji lin"],["四平","si ping"],["辽源","liao yuan"],["通化","tong hua"],
+  ["白山","bai shan"],["松原","song yuan"],["白城","bai cheng"],["延边","yan bian"],
+  ["哈尔滨","ha er bin"],["齐齐哈尔","qi qi ha er"],["鸡西","ji xi"],["鹤岗","he gang"],["双鸭山","shuang ya shan"],
+  ["大庆","da qing"],["伊春","yi chun"],["佳木斯","jia mu si"],["七台河","qi tai he"],["牡丹江","mu dan jiang"],
+  ["黑河","hei he"],["绥化","sui hua"],
+  ["南宁","nan ning"],["柳州","liu zhou"],["桂林","gui lin"],["梧州","wu zhou"],["北海","bei hai"],
+  ["防城港","fang cheng gang"],["钦州","qin zhou"],["贵港","gui gang"],["玉林","yu lin"],["百色","bai se"],
+  ["贺州","he zhou"],["河池","he chi"],["来宾","lai bin"],["崇左","chong zuo"],
+  ["海口","hai kou"],["三亚","san ya"],["三沙","san sha"],["儋州","dan zhou"],
+  ["成都","cheng du"],["自贡","zi gong"],["攀枝花","pan zhi hua"],["泸州","lu zhou"],["德阳","de yang"],
+  ["绵阳","mian yang"],["广元","guang yuan"],["遂宁","sui ning"],["内江","nei jiang"],["乐山","le shan"],
+  ["南充","nan chong"],["眉山","mei shan"],["宜宾","yi bin"],["广安","guang an"],["达州","da zhou"],
+  ["雅安","ya an"],["巴中","ba zhong"],["资阳","zi yang"],["阿坝","a ba"],["甘孜","gan zi"],["凉山","liang shan"],
+  ["贵阳","gui yang"],["六盘水","liu pan shui"],["遵义","zun yi"],["安顺","an shun"],["毕节","bi jie"],
+  ["铜仁","tong ren"],["黔西南","qian xi nan"],["黔东南","qian dong nan"],["黔南","qian nan"],
+  ["昆明","kun ming"],["曲靖","qu jing"],["玉溪","yu xi"],["保山","bao shan"],["昭通","zhao tong"],
+  ["丽江","li jiang"],["普洱","pu er"],["临沧","lin cang"],["大理","da li"],["楚雄","chu xiong"],
+  ["红河","hong he"],["文山","wen shan"],["西双版纳","xi shuang ban na"],["德宏","de hong"],["怒江","nu jiang"],["迪庆","di qing"],
+  ["拉萨","la sa"],["日喀则","ri ka ze"],["昌都","chang du"],["林芝","lin zhi"],["山南","shan nan"],["那曲","na qu"],
+  ["西安","xi an"],["铜川","tong chuan"],["宝鸡","bao ji"],["咸阳","xian yang"],["渭南","wei nan"],
+  ["延安","yan an"],["汉中","han zhong"],["榆林","yu lin"],["安康","an kang"],["商洛","shang luo"],
+  ["兰州","lan zhou"],["嘉峪关","jia yu guan"],["金昌","jin chang"],["白银","bai yin"],["天水","tian shui"],
+  ["武威","wu wei"],["张掖","zhang ye"],["平凉","ping liang"],["酒泉","jiu quan"],["庆阳","qing yang"],
+  ["定西","ding xi"],["陇南","long nan"],["临夏","lin xia"],["甘南","gan nan"],
+  ["西宁","xi ning"],["海东","hai dong"],
+  ["银川","yin chuan"],["石嘴山","shi zui shan"],["吴忠","wu zhong"],["固原","gu yuan"],["中卫","zhong wei"],
+  ["乌鲁木齐","wu lu mu qi"],["克拉玛依","ke la ma yi"],["吐鲁番","tu lu fan"],["哈密","ha mi"],
+  ["喀什","ka shi"],["阿克苏","a ke su"],["和田","he tian"],["伊宁","yi ning"],["库尔勒","ku er le"],["昌吉","chang ji"],
+  ["香港","xiang gang"],["澳门","ao men"],["台北","tai bei"],["高雄","gao xiong"],["台中","tai zhong"],["台南","tai nan"]
+];
+let PYIDX = null;
+/* 大城市优先：直辖市+省会+热门旅游城市，首字母歧义时（如 wh=武汉/威海）排前面 */
+const PYMAJOR = "北京 上海 天津 重庆 广州 深圳 成都 杭州 武汉 西安 南京 苏州 青岛 长沙 郑州 沈阳 哈尔滨 昆明 大连 厦门 三亚 桂林 丽江 贵阳 兰州 乌鲁木齐 香港 澳门 台北";
+function pyIndex() {
+  if (!PYIDX) {
+    const major = PYMAJOR.split(" ");
+    PYIDX = PYCITY.map(function (it) {
+      const s = it[1].split(" ");
+      return { n: it[0], py: s.join(""), ab: s.map(function (x) { return x[0]; }).join(""), mj: major.indexOf(it[0]) >= 0 ? 0 : 1 };
+    });
+  }
+  return PYIDX;
+}
+/* 纯字母查询 → 候选中文城市名（最多 4 个）。精确命中→大城市→普通，依次排前。 */
+function expandQuery(q) {
+  const hits = pyIndex().filter(function (c) {
+    return c.ab === q || c.py === q ||
+      (q.length >= 3 && c.py.indexOf(q) === 0) ||
+      (q.length >= 2 && c.ab.indexOf(q) === 0);
+  });
+  hits.sort(function (a, b) {
+    return (b.ab === q) - (a.ab === q) || (b.py === q) - (a.py === q) || a.mj - b.mj;
+  });
+  return hits.slice(0, 4).map(function (c) { return c.n; });
+}
+
+function geoURL(name) {
+  return "https://geocoding-api.open-meteo.com/v1/search?name=" +
+    encodeURIComponent(name) + "&count=5&language=zh&format=json";
+}
+async function searchCities(q) {
+  const isAscii = /^[a-z]+$/i.test(q.trim());
+  const direct = fetchJSON(geoURL(q), 8000).then((d) => d.results || []).catch(() => []);
+  /* 字母查询时并行做本地展开（km → 昆明）；中文/混合查询不需要。
+     每个候选城市同时查「XX市」和「XX」——API 的中文匹配常常只认带「市」的全称
+     （搜「长沙」只回乡镇，搜「长沙市」才回长沙市），市的结果排前面。 */
+  let extra = Promise.resolve([]);
+  if (isAscii && q.trim().length <= 6) {
+    const names = expandQuery(q.trim().toLowerCase());
+    if (names.length) {
+      extra = Promise.all(names.map((n) =>
+        Promise.all([
+          fetchJSON(geoURL(n + "市"), 8000).then((d) => d.results || []).catch(() => []),
+          fetchJSON(geoURL(n), 8000).then((d) => d.results || []).catch(() => []),
+        ]).then((pair) => pair[0].concat(pair[1]))
+      )).then((arrs) => arrs.flat());
+    }
+  }
+  const [a, b] = await Promise.all([direct, extra]);
+  /* 字母短查询时，展开结果（用户真实意图）排前面，直接查询的杂音结果垫底 */
+  const ordered = (isAscii && q.trim().length <= 6 && b.length) ? b.concat(a) : a.concat(b);
+  const seen = new Set(); const out = [];
+  for (const r of ordered) {
+    /* 坐标取 1 位小数做去重键：直接查询与展开查询返回的坐标常有微小差异 */
+    const k = r.name + "|" + Number(r.latitude).toFixed(1) + "," + Number(r.longitude).toFixed(1);
+    if (!seen.has(k)) { seen.add(k); out.push(r); }
+    if (out.length >= 8) break;
+  }
+  return out;
+}
+
+function openSearch() {
+  $("search").classList.add("open");
+  const inp = $("q");
+  inp.value = "";
+  $("res").innerHTML = '<div class="tip">输入城市名后回车</div>';
+  setTimeout(() => inp.focus(), 60);
+  closeLook();   /* 两个层不同时开 */
+  /* 告诉主进程"搜索层开着"：子窗口收不到 ESC / 不会 blur，只能靠主进程
+     轮询系统按键和光标位置来补这两个出口（见 main.js 的 watchSearchExit）。 */
+  try { if (window.wgt && window.wgt.searchState) window.wgt.searchState(true); } catch (e) {}
+}
+function closeSearch() {
+  const was = $("search").classList.contains("open");
+  $("search").classList.remove("open");
+  imeFinish();   /* 搜索层关了，输入桥一起收（普通模式 imeOn 恒 false，无副作用） */
+  if (was) { try { if (window.wgt && window.wgt.searchState) window.wgt.searchState(false); } catch (e) {} }
+}
+
+/* ================= 外观：透明度 / 磨砂（与待办卡同款） =================
+   --a 底色浓度（1=原状不透明渐变），--frost 快照模糊半径。
+   磨砂模糊的是 #bd 那张桌面快照 —— 真透窗里 backdrop-filter 模糊不了桌面。 */
+const LOOK = { alpha: 1, frost: 0 };
+
+/* 主进程推来的外观变更（Ctrl+滚轮、或别处改的） */
+if (window.wgt && window.wgt.onLook) {
+  window.wgt.onLook((v) => {
+    if (typeof v.alpha === "number") LOOK.alpha = v.alpha;
+    if (typeof v.frost === "number") LOOK.frost = v.frost;
+    applyLook();
+    lookUI();
+  });
+}
+
+function applyLook() {
+  const r = document.documentElement.style;
+  r.setProperty("--a", String(LOOK.alpha));
+  r.setProperty("--frost", LOOK.frost + "px");
+}
+
+function lookUI() {
+  const ai = $("lkAlpha"), fi = $("lkFrost");
+  if (!ai || !fi) return;
+  ai.value = String(Math.round((1 - LOOK.alpha) * 100));
+  fi.value = String(Math.round(LOOK.frost));
+  $("lkAlphaV").textContent = ai.value + "%";
+  $("lkFrostV").textContent = fi.value + "px";
+}
+
+let lookSaveTimer = null;
+function saveLookSoon() {
+  clearTimeout(lookSaveTimer);
+  lookSaveTimer = setTimeout(() => {
+    if (window.wgt && window.wgt.setLook) window.wgt.setLook(LOOK);
+  }, 220);
+}
+
+function openLook() {
+  lookUI();
+  $("look").classList.add("open");
+  /* 复用搜索层那条主进程轮询通道：子窗口收不到 ESC、点外面也不 blur */
+  try { if (window.wgt && window.wgt.searchState) window.wgt.searchState(true); } catch (e) {}
+}
+function closeLook() {
+  const was = $("look").classList.contains("open");
+  $("look").classList.remove("open");
+  if (was) { try { if (window.wgt && window.wgt.searchState) window.wgt.searchState(false); } catch (e) {} }
+}
+
+function bindLook() {
+  const ai = $("lkAlpha"), fi = $("lkFrost");
+  if (!ai || !fi) return;
+  ai.addEventListener("input", () => {
+    LOOK.alpha = Math.min(1, Math.max(0.1, 1 - Number(ai.value) / 100));
+    applyLook();
+    $("lkAlphaV").textContent = ai.value + "%";
+    saveLookSoon();
+  });
+  fi.addEventListener("input", () => {
+    LOOK.frost = Math.min(20, Math.max(0, Number(fi.value) || 0));
+    applyLook();
+    $("lkFrostV").textContent = fi.value + "px";
+    saveLookSoon();
+  });
+  $("lkBtn").addEventListener("click", closeLook);
+}
+
+/* 主进程裁好的快照：按"相对窗口左上角"的 CSS px 铺在 #bd 上 */
+function setBackdrop(p) {
+  const bd = $("bd");
+  if (!p || !p.url) { document.body.classList.remove("has-bd"); return; }
+  bd.style.backgroundImage = "url(" + p.url + ")";
+  bd.style.backgroundSize = "100% 100%";   /* 裁块与元素同尺寸，1:1 铺（拖动后会从这里复位） */
+  bd.style.left = p.left + "px";
+  bd.style.top = p.top + "px";
+  bd.style.width = p.w + "px";
+  bd.style.height = p.h + "px";
+  document.body.classList.add("has-bd");
+}
+
+/* 拖动实况（整幅快照方案）：起拖收到整幅快照，把它按屏幕坐标"钉死"在桌面
+   上 —— 之后拖动 tick 只更新 #bd 的 left/top。背景纹丝不动、窗口在上面滑，
+   像素级对齐；旧的"每 70ms 重裁一块"两次推送之间卡片动了背景没动，
+   拖快了背景就错位（用户报的"透明时和背景没对齐"）。
+   devicePixelRatio 已含页面 zoom，物理 px ÷ 它 = CSS px。 */
+let bdFullImg = null;    /* { url, ox, oy, w, h } —— blob 缓存，一次拖动只解码一次 */
+function placeBdFull(x, y) {
+  if (!bdFullImg) return;
+  const bd = $("bd");
+  if (!bd) return;
+  const s = window.devicePixelRatio || 1;
+  bd.style.left = ((bdFullImg.ox - x) / s) + "px";
+  bd.style.top = ((bdFullImg.oy - y) / s) + "px";
+  bd.style.width = (bdFullImg.w / s) + "px";
+  bd.style.height = (bdFullImg.h / s) + "px";
+  bd.style.backgroundImage = "url(" + bdFullImg.url + ")";
+  bd.style.backgroundSize = "100% 100%";
+  document.body.classList.add("has-bd");
+}
+if (window.wgt.onBdFull) window.wgt.onBdFull((p) => {
+  if (!p || !p.png) return;
+  if (bdFullImg) { try { URL.revokeObjectURL(bdFullImg.url); } catch (e) { } }
+  bdFullImg = {
+    url: URL.createObjectURL(new Blob([p.png], { type: "image/png" })),
+    ox: p.ox, oy: p.oy, w: p.w, h: p.h,
+  };
+});
+if (window.wgt.onBdPos) window.wgt.onBdPos((p) => placeBdFull(p.x, p.y));
+if (window.wgt.onBdDragEnd) window.wgt.onBdDragEnd(() => {
+  /* 松手后主进程推 patch 载荷，setBackdrop 重设 #bd —— 这里不用动。
+     bdFullImg 特意不撤销：下回拖动直接复用，除非快照更新重发。 */
+});
+
+let searchTimer = null;
+async function doSearch(q) {
+  q = (q || "").trim();
+  if (!q) return;
+  $("res").innerHTML = '<div class="tip">搜索中…</div>';
+  const list = await searchCities(q);
+  if (!list.length) {
+    $("res").innerHTML = '<div class="tip">没找到这个城市</div>';
+    return;
+  }
+  $("res").innerHTML = list.map((r, i) => {
+    const sub = [r.admin1, r.country].filter(Boolean).join(" · ");
+    return '<div class="r" data-i="' + i + '"><div><div class="n">' +
+      escapeHTML(r.name) + '</div><div class="m">' + escapeHTML(sub) + '</div></div></div>';
+  }).join("");
+
+  Array.from($("res").querySelectorAll(".r")).forEach((el) => {
+    el.addEventListener("click", () => {
+      const r = list[Number(el.dataset.i)];
+      state.place = { lat: r.latitude, lon: r.longitude, name: r.name, manual: true };
+      writeManual(state.place);
+      closeSearch();
+      boot(false);
+    });
+  });
+}
+
+/* ================= 交互绑定 ================= */
+$("cityBtn").addEventListener("click", openSearch);
+/* 搜索层右上角的叉：桌面层里 ESC 和"点空白"都可能收不到，这是保底出口 */
+$("sxBtn").addEventListener("click", () => closeSearch());
+$("menuBtn").addEventListener("click", () => { if (window.wgt) window.wgt.menu(); });
+$("refreshBtn").addEventListener("click", () => boot(false));
+$("closeBtn").addEventListener("click", () => {
+  if (window.wgt) window.wgt.close(); else window.close();
+});
+$("card").addEventListener("contextmenu", (e) => {
+  e.preventDefault();
+  if (window.wgt) window.wgt.menu();
+});
+$("card").addEventListener("dblclick", (e) => {
+  if (e.target.closest(".act") || e.target.closest(".city")) return;
+  boot(false);
+});
+$("q").addEventListener("input", (e) => {
+  clearTimeout(searchTimer);
+  const v = e.target.value;
+  searchTimer = setTimeout(() => doSearch(v), 420);
+});
+$("q").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") { clearTimeout(searchTimer); doSearch(e.target.value); }
+  if (e.key === "Escape") closeSearch();
+});
+
+/* ================= 桌面层输入桥 =================
+   卡片贴进桌面层后是 Progman 的子窗口，永远进不了前台输入队列 ——
+   系统键盘（含输入法）到不了搜索框。主进程的隐形"幽灵输入窗"代收
+   （见 main.js「桌面层输入桥」）：搜索框一拿焦点就报屏幕矩形，
+   文字/回车/Esc/失焦实时桥回来。普通窗口模式主进程会忽略请求。 */
+let imeOn = false;
+
+$("q").addEventListener("focusin", () => {
+  if (!window.wgt || !window.wgt.imeBegin) return;
+  /* ★ 一聚焦就算"桥已打开"（同待办卡）：否则点进来没打字就点走时
+     imeFinish 会早退，幽灵输入窗收不到结束信号。 */
+  imeOn = true;
+  const r = $("q").getBoundingClientRect();
+  window.wgt.imeBegin({ x: r.left, y: r.top, w: r.width, h: r.height, value: $("q").value });
+});
+
+function imeFinish() {
+  if (!imeOn) return;
+  imeOn = false;
+  if (window.wgt && window.wgt.imeEnd) window.wgt.imeEnd();
+}
+
+if (window.wgt && window.wgt.onImeText) {
+  window.wgt.onImeText((v) => {
+    imeOn = true;
+    $("q").value = String(v == null ? "" : v);
+    /* 和手打一样走防抖搜索：幽灵窗代收的字也能边打边出结果 */
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(() => doSearch($("q").value), 420);
+  });
+  window.wgt.onImeCommit(() => { imeFinish(); doSearch($("q").value); });
+  window.wgt.onImeCancel(() => { imeFinish(); $("q").value = ""; $("res").innerHTML = '<div class="tip">输入城市名后回车</div>'; });
+  window.wgt.onImeBlur(() => { imeFinish(); });   /* 点去别处：留着已输入的文字 */
+}
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") { closeSearch(); closeLook(); }
+  if (e.key === "F5") { e.preventDefault(); boot(false); }
+});
+$("search").addEventListener("click", (e) => { if (e.target === $("search")) closeSearch(); });
+/* 点到卡片外面（桌面空白处 / 其他窗口）→ 卡片失焦 → 自动收起搜索层 */
+window.addEventListener("blur", () => closeSearch());
+
+if (window.wgt) {
+  window.wgt.onRefresh(() => boot(false));
+  window.wgt.onSearchOpen(openSearch);
+  /* 主进程替搜索层盯着的两个出口：ESC、点到窗口外面 */
+  if (window.wgt.onSearchExit) window.wgt.onSearchExit(() => { closeSearch(); closeLook(); });
+  /* 菜单里的「回到自动定位」：清掉手动选择，重新按定位走一遍 */
+  window.wgt.onRelocate(() => boot(true));
+  /* 桌面快照背景 + 外观面板 */
+  if (window.wgt.onBackdrop) window.wgt.onBackdrop(setBackdrop);
+  if (window.wgt.backdropNow) window.wgt.backdropNow().then(setBackdrop).catch(() => {});
+  if (window.wgt.onShowLook) window.wgt.onShowLook(() => {
+    if ($("look").classList.contains("open")) closeLook(); else openLook();
+  });
+  if (window.wgt.getLook) {
+    window.wgt.getLook().then((v) => {
+      if (!v) return;
+      if (Number.isFinite(v.alpha)) LOOK.alpha = Math.min(1, Math.max(0.1, v.alpha));
+      if (Number.isFinite(v.frost)) LOOK.frost = Math.min(20, Math.max(0, v.frost));
+      applyLook();
+      lookUI();
+    }).catch(() => {});
+  }
+  bindLook();
+}
+
+/* 回到前台补一次（超过 3 分钟才拉，避免无意义请求） */
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible" && Date.now() - state.lastUpdate > 3 * 60 * 1000) {
+    boot(false);
+  }
+});
+
+document.body.classList.add(window.wgt && window.wgt.acrylic ? "acrylic" : "solid");
+/* 贴进桌面层：让 #bd 快照铺满整窗，圆角外那圈显示成桌面本身（见 CSS 里 body.dlayer） */
+if (window.wgt && window.wgt.dlayer) document.body.classList.add("dlayer");
+
+/* 鼠标指上来就临时浮到最前，移开还原：两张卡是两个窗口，被另一张压住时
+   不抬升就只能先点一下才看得见。临时状态，不改用户设的"窗口置顶"。 */
+const cardBox = document.getElementById("card");
+if (cardBox && window.wgt && window.wgt.raise) {
+  let restTimer = null;
+  cardBox.addEventListener("mouseenter", () => {
+    clearTimeout(restTimer);
+    window.wgt.raise();
+  });
+  cardBox.addEventListener("mouseleave", () => {
+    clearTimeout(restTimer);
+    /* 隔一拍再用 :hover 复核：窗口刚被挪动时 Chromium 偶尔误报离开 */
+    restTimer = setTimeout(() => {
+      if (cardBox.matches(":hover")) return;
+      window.wgt.rest();
+    }, 110);
+  });
+}
+
+/* ================= 拖动窗口：只报按下/松开，位置由主进程跟光标 =================
+   卡片贴进桌面层后是 Progman 的子窗口（WS_CHILD），系统自带的
+   -webkit-app-region: drag 在子窗口上不生效（用户实测：拖不动 / 慢半拍 / 一闪一闪）。
+   子窗口本身能移动，所以改成主进程每 8ms 读系统光标直接 SetWindowPos ——
+   页面这边只负责告诉它"左键在卡上按下了""松开了"，不参与算位移
+   （渲染进程算位移再逐帧 IPC 会慢半拍，窗口一动 mousemove 就被节流）。
+
+   交互区（按钮、城市、搜索层、搜索结果）不能当拖动手柄。 */
+const NO_DRAG = "button, a, input, #search, #cityBtn, .acts, .city, .r, .rz";
+let pressing = false;
+
+function endPress() {
+  if (!pressing) return;
+  pressing = false;
+  document.body.classList.remove("press-lock");
+  if (window.wgt && window.wgt.dragEnd) window.wgt.dragEnd();
+}
+
+window.addEventListener("mousedown", (e) => {
+  if (e.button !== 0) return;
+  if (e.target.closest(NO_DRAG)) return;
+  pressing = true;
+  document.body.classList.add("press-lock");   /* 拖窗口时别选中文字 */
+  if (window.wgt && window.wgt.dragBegin) window.wgt.dragBegin();
+}, true);
+
+/* 四角缩放：只报"从哪个角开始/结束"，尺寸由主进程跟光标算 */
+document.querySelectorAll(".rz").forEach((el) => {
+  el.addEventListener("mousedown", (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (window.wgt && window.wgt.resizeBegin) window.wgt.resizeBegin(el.dataset.c);
+  });
+});
+const endResize = () => { if (window.wgt && window.wgt.resizeEnd) window.wgt.resizeEnd(); };
+window.addEventListener("mouseup", endResize);
+window.addEventListener("blur", endResize);
+
+window.addEventListener("mouseup", () => endPress());
+window.addEventListener("blur", () => endPress());
+
+/* Ctrl+滚轮缩放：5% 一档，70%~160%。
+   普通滚轮不拦（城市搜索列表还要用它滚动），只有按住 Ctrl 才改成缩放，
+   同时挡掉 Chromium 自带的页面缩放 —— 那会把内容缩成一小块、窗口不变。 */
+window.addEventListener("wheel", (e) => {
+  if (!e.ctrlKey) return;
+  e.preventDefault();
+  if (window.wgt && window.wgt.scaleStep) window.wgt.scaleStep(e.deltaY < 0 ? 1 : -1);
+}, { passive: false });
+
+boot(false);   /* 有 30 分钟内的定位结果就直接用，没有再重新识别 */
+</script>
+</body>
+</html>

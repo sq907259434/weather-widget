@@ -1,0 +1,19 @@
+# 依赖与产物
+node_modules/
+dist/
+build.log
+*.log
+
+# 系统杂项
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# 编辑器
+.vscode/
+.idea/
+
+# 本地临时校验文件
+_chk/
+*.bak
+继续这里.md
