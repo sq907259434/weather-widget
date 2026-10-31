@@ -40,6 +40,7 @@ contextBridge.exposeInMainWorld("wgt", {
   /* 外观（透明度/磨砂）：面板开关走主进程菜单，值存 widget-state.json 的 look */
   getLook: () => ipcRenderer.invoke("wgt:get-look"),
   setLook: (v) => ipcRenderer.invoke("wgt:set-look", v),
+  onLook: (fn) => ipcRenderer.on("wgt:look", (_e, v) => fn(v || {})),
   onShowLook: (fn) => ipcRenderer.on("wx:show-look", () => fn()),
   /* 桌面层输入桥：卡片是 Progman 子窗口拿不到键盘焦点，搜索框打字由
      主进程的隐形输入窗代收（见 main.js「桌面层输入桥」）。 */

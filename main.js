@@ -15,7 +15,10 @@ const createBackdrop = require("./backdrop");
    居中。矮 62 之后这段净间距从 57px 收到 26px，上下多余留白一起消掉。
    主区在 374 的窗口里仍有 117px，内容（大温度+描述+范围）约 101px，不挤。 */
 const CARD_W = 320;
-const CARD_H = 330;
+/* 330 装不下"5 小时条 + 空气/风/紫外线 + 三天预报 + 更新于"，
+   底部会被 overflow:hidden 裁掉（用户报的"信息显示不全"）。
+   放到 360 留出余量；卡片内部用的是 flex，多出来的空间由主区吸收。 */
+const CARD_H = 360;
 
 /* Windows 11 22H2+ 才有原生 acrylic。有就用系统磨砂（实时、真实模糊窗口背后的桌面）；
    没有就退回半透明渐变。 */
@@ -405,7 +408,9 @@ function startRegionWatch() {
 }
 
 function applyCardRegion(w) {
-  if (!_rgn || !w || w.isDestroyed()) return;
+  if (!_rgn || !w || w.isDestroyed()) {
+    return;
+  }
   const b = w.getBounds();
   let dpi = 1, zoom = 1;
   try { dpi = screen.getDisplayMatching(b).scaleFactor || 1; } catch (e) {}
@@ -1036,7 +1041,22 @@ function createWindow() {
 
   w.loadFile(path.join(__dirname, "widget.html"));
 
+  /* zoom 会被导航/重载重置，所以在加载完成后再压几次，并记下真实生效值 */
+  const applyZoom = (tag) => {
+    try {
+      const want = currentScale();
+      w.webContents.setZoomFactor(want);
+
+    } catch (e) { evlogSafe("zoom err " + e.message); }
+  };
+  w.webContents.on("did-finish-load", () => { applyZoom(); setTimeout(applyZoom, 400); });
+
   w.once("ready-to-show", () => {
+    /* ★ zoom 必须在页面加载完成后再设一次。
+       加载前调 setZoomFactor 会被导航重置回 1：窗口按 scale 缩小了，
+       页面却还是 100% 渲染 → 320x330 的卡片塞进 230x238 的窗口，
+       底部内容被裁、四角被窗口边界切掉（用户看到的"信息显示不全 + 四角白边"）。 */
+    try { w.webContents.setZoomFactor(currentScale()); } catch (e) {}
     w.show();
     pushBackdrop(260);
     applyCardRegion(w);       /* 圆角外的黑三角：窗口裁成圆角矩形后就不存在了 */
@@ -1308,6 +1328,10 @@ app.whenReady().then(() => {
       frost: Math.min(20, Math.max(0, Number(o.frost) || 0)),    /* 快照模糊半径 px */
     };
     patchState({ look });
+    /* ★ 必须推回页面：之前只存了状态，页面完全不知道 ——
+       从 Ctrl+滚轮 微调（走主进程）改的透明度/磨砂要重启才生效，
+       用户看到的就是"透明度跟磨砂都失效了"。 */
+    try { if (weatherWin && !weatherWin.isDestroyed()) weatherWin.webContents.send("wgt:look", look); } catch (e) {}
     return look;
   });
 

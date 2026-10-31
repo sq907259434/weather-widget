@@ -343,6 +343,12 @@
   #bd{
     position:absolute; left:-22px; top:-22px; width:calc(100% + 44px); height:calc(100% + 44px);
     z-index:0; pointer-events:none;
+    /* ★ 把快照层自己裁成卡片的圆角形状。
+       窗口区域（SetWindowRgn）一旦没设上，窗口就是直角，这层快照会从四个角
+       露出来 —— 就是用户截到的"四角各有一个浅色方块"。
+       在这里用 clip-path 兜底：快照比卡片大 22px，所以往里收 22px 再圆角 18px，
+       正好和卡片轮廓重合，四角变透明（露出后面的桌面）。 */
+    clip-path:inset(22px 22px 22px 22px round 18px);
     background-size:cover; background-position:center;
     opacity:0; transition:opacity .25s ease;
     filter:blur(var(--frost));
@@ -1284,6 +1290,16 @@ function closeSearch() {
    --a 底色浓度（1=原状不透明渐变），--frost 快照模糊半径。
    磨砂模糊的是 #bd 那张桌面快照 —— 真透窗里 backdrop-filter 模糊不了桌面。 */
 const LOOK = { alpha: 1, frost: 0 };
+
+/* 主进程推来的外观变更（Ctrl+滚轮、或别处改的） */
+if (window.wgt && window.wgt.onLook) {
+  window.wgt.onLook((v) => {
+    if (typeof v.alpha === "number") LOOK.alpha = v.alpha;
+    if (typeof v.frost === "number") LOOK.frost = v.frost;
+    applyLook();
+    lookUI();
+  });
+}
 
 function applyLook() {
   const r = document.documentElement.style;
