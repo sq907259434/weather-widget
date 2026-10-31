@@ -317,7 +317,12 @@ function fgIsDesktop() {
 const wallpaperFile = () =>
   path.join(app.getPath("appData"), "Microsoft", "Windows", "Themes", "TranscodedWallpaper");
 function wallpaperStamp() {
-  try { const s = fs.statSync(wallpaperFile()); return s.mtimeMs || 0; } catch (e) { return 0; }
+  /* 修改时间 + 大小：Windows 换壁纸会重写 TranscodedWallpaper，
+     两个值一起比，比只看 mtime 更稳（同一张图重新应用也能识别）。 */
+  try {
+    const s = fs.statSync(wallpaperFile());
+    return (s.mtimeMs || 0) + ":" + (s.size || 0);
+  } catch (e) { return 0; }
 }
 
 function scheduleSnapshot(delay, reason) {
@@ -357,8 +362,8 @@ function startDesktopWatch() {
     const s = wallpaperStamp();
     if (!s || s === _wpStamp) return;
     _wpStamp = s;
-    scheduleSnapshot(600, "wallpaper");
-  }, 5000);
+    scheduleSnapshot(500, "wallpaper");
+  }, 2000);
 
   try { screen.on("display-metrics-changed", () => scheduleSnapshot(800, "metrics")); } catch (e) {}
 
@@ -936,7 +941,8 @@ function createWindow() {
       if (now) dl.raise();
     }, 120);
   }
-  if (dl.available && desktopLayerOn()) {
+  /* 勾了「窗口置顶」就不进桌面层（子窗口置顶无效，两者互斥） */
+  if (dl.available && desktopLayerOn() && !top) {
     w.once("show", () => setTimeout(() => {
       if (!desktopLayerOn()) return;
       dl.set(true).then((ok) => evlogSafe("dlayer startup " + ok));
@@ -1176,13 +1182,23 @@ async function buildMenu() {
       click: (item) => { toggleDesktopLayer(item.checked); },
     },
     {
-      label: "窗口置顶",
+      label: "窗口置顶（会脱离桌面层）",
       type: "checkbox",
       checked: onTop,
-      click: (item) => {
+      click: async (item) => {
         patchState({ top: item.checked });
-        if (weatherWin && !weatherWin.isDestroyed()) {
-          weatherWin.setAlwaysOnTop(item.checked, "floating");
+        const w = weatherWin;
+        if (!w || w.isDestroyed()) return;
+        /* 贴进桌面层时是 Progman 的子窗口，setAlwaysOnTop 对子窗口无效 ——
+           要真浮到最前必须先脱离桌面层（两者天然互斥）。 */
+        if (item.checked) {
+          patchState({ desktopLayer: false });
+          try { if (DL && DL.isOn && DL.isOn()) await DL.set(false); } catch (e) {}
+          try { w.setAlwaysOnTop(true, "floating"); } catch (e) {}
+        } else {
+          patchState({ desktopLayer: true });
+          try { w.setAlwaysOnTop(false); } catch (e) {}
+          try { if (DL) await DL.set(true); } catch (e) {}
         }
       },
     },
