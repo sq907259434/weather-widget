@@ -400,8 +400,11 @@ function applyCardRegion(w) {
   const rad = Math.max(2, Math.round(10 * s));   /* CSS border-radius:10px */
   let hrgn = 0;
   try {
+    /* ★ 最后两个参数是"椭圆的长和宽"，圆角半径 = 值 / 2。
+       一直传 rad，实际圆角只有 CSS 的一半，窗口区域比卡片"方"，
+       四个角会露出一条弧形缝（拖动时缝里是底下的桌面快照）。 */
     hrgn = Number(_rgn.CreateRoundRectRgn(
-      m, m, W - m + 1, H - m + 1, rad, rad));
+      m, m, W - m + 1, H - m + 1, rad * 2, rad * 2));
     if (hrgn) _rgn.SetWindowRgn(hwndOf(w), hrgn, true);
   } catch (e) {}
 }
@@ -617,6 +620,54 @@ function clampScale(raw) {
 
 function currentScale() {
   try { return clampScale(readState().scale); } catch (e) { return 1; }
+}
+
+/* ================= 四角拖拽缩放 =================
+   等比：窗口尺寸 × z + zoomFactor = z，页面按基准视口排版，不用重算布局。
+   角在右边 → 宽度跟光标；在左边 → 左边界跟光标、宽高反算。 */
+function resizeStop(w) {
+  if (!w || !w.__rz) return;
+  const st = w.__rz;
+  clearInterval(st.timer);
+  w.__rz = null;
+  /* 用最后一帧算出来的 z，不要用 getZoomFactor()：
+     实测拖动刚结束那一刻它可能还是旧值，存下来会让重启后的尺寸对不上。 */
+  try {
+    const b = w.getBounds();
+    const z = Number(st.lastZ);
+    if (Number.isFinite(z) && z >= SCALE_MIN - 0.001) patchState({ x: b.x, y: b.y, scale: z });
+  } catch (e) {}
+}
+
+function resizeBegin(w, corner) {
+  resizeStop(w);
+  const b = w.getBounds();
+  const p0 = screen.getCursorScreenPoint();          /* Electron 给的是 DIP */
+  const st = {
+    corner, ox: b.x, oy: b.y, ow: b.width, oh: b.height,
+    cx: p0.x, cy: p0.y,
+    baseW: CARD_W + PAD * 2,
+    timer: null,
+  };
+  w.__rz = st;
+  st.timer = setInterval(() => {
+    if (w.isDestroyed()) { resizeStop(w); return; }
+    const p = screen.getCursorScreenPoint();
+    const dx = p.x - st.cx;
+    const right = corner === "tr" || corner === "br";
+    const bottom = corner === "bl" || corner === "br";
+    const z = clampScale((st.ow + (right ? dx : -dx)) / st.baseW);
+    const nw = Math.round(st.baseW * z);
+    const nh = Math.round((CARD_H + PAD * 2) * z);
+    const nx = right ? st.ox : st.ox + (st.ow - nw);
+    const ny = bottom ? st.oy : st.oy + (st.oh - nh);
+    st.lastZ = z;
+    try {
+      w.webContents.setZoomFactor(z);
+      w.setBounds({ x: nx, y: ny, width: nw, height: nh });
+      applyCardRegion(w);
+    } catch (e) {}
+  }, 16);
 }
 
 function applyScale(raw) {
@@ -1183,6 +1234,15 @@ app.whenReady().then(() => {
     const w = senderWin(e);
     if (!w || w.isDestroyed()) return;
     dragBegin(w);
+  });
+
+  ipcMain.on("wgt:resize-begin", (e, corner) => {
+    const w = BrowserWindow.fromWebContents(e.sender);
+    if (w) resizeBegin(w, String(corner || "br"));
+  });
+  ipcMain.on("wgt:resize-end", (e) => {
+    const w = BrowserWindow.fromWebContents(e.sender);
+    if (w) resizeStop(w);
   });
 
   ipcMain.on("wgt:drag-end", (e) => {

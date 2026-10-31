@@ -15,6 +15,9 @@ contextBridge.exposeInMainWorld("wgt", {
      在子窗口上不生效（会慢半拍甚至完全不动），所以整条拖动自己实现。 */
   dragBegin: () => ipcRenderer.send("wgt:drag-begin"),
   dragEnd: () => ipcRenderer.send("wgt:drag-end"),
+  /* 四角缩放 */
+  resizeBegin: (corner) => ipcRenderer.send("wgt:resize-begin", corner),
+  resizeEnd: () => ipcRenderer.send("wgt:resize-end"),
   /* 缩放：Ctrl+滚轮，dir=+1 放大 / -1 缩小（5% 一档） */
   scaleStep: (dir) => ipcRenderer.send("wgt:scale-step", dir),
   /* 走主进程查 IP 归属：绕开系统代理，避免定位到代理出口所在的国家 */

@@ -69,6 +69,25 @@
   body.press-lock, body.press-lock *{ user-select:none !important; }
 
   /* 系统磨砂模式下：卡片自身必须全透明，否则会把系统模糊盖死 */
+  /* 四角缩放热区 */
+  .rz{
+    position:absolute; width:26px; height:26px; z-index:9;
+    cursor:nwse-resize;
+  }
+  .rz-tl{ left:0; top:0; }
+  .rz-br{ right:0; bottom:0; }
+  .rz-tr{ right:0; top:0; cursor:nesw-resize; }
+  .rz-bl{ left:0; bottom:0; cursor:nesw-resize; }
+  .rz::after{
+    content:""; position:absolute; width:9px; height:9px;
+    opacity:0; transition:opacity .15s ease;
+  }
+  .rz-tl::after{ left:3px; top:3px; border-left:2px solid rgba(255,255,255,.5); border-top:2px solid rgba(255,255,255,.5); border-radius:2px 0 0 0; }
+  .rz-br::after{ right:3px; bottom:3px; border-right:2px solid rgba(255,255,255,.5); border-bottom:2px solid rgba(255,255,255,.5); border-radius:0 0 2px 0; }
+  .rz-tr::after{ right:3px; top:3px; border-right:2px solid rgba(255,255,255,.5); border-top:2px solid rgba(255,255,255,.5); border-radius:0 2px 0 0; }
+  .rz-bl::after{ left:3px; bottom:3px; border-left:2px solid rgba(255,255,255,.5); border-bottom:2px solid rgba(255,255,255,.5); border-radius:0 0 0 2px; }
+  .rz:hover::after{ opacity:1; }
+
   body.acrylic .card{
     background-image:none;
     background-color:transparent;
@@ -370,6 +389,10 @@
 
 <div id="bd"></div>
 <div class="card" id="card">
+  <i class="rz rz-tl" data-c="tl"></i>
+  <i class="rz rz-tr" data-c="tr"></i>
+  <i class="rz rz-bl" data-c="bl"></i>
+  <i class="rz rz-br" data-c="br"></i>
   <div class="tint"></div>
   <div class="hd">
     <div class="city" id="cityBtn" title="点击搜索城市">
@@ -1516,7 +1539,7 @@ if (cardBox && window.wgt && window.wgt.raise) {
    （渲染进程算位移再逐帧 IPC 会慢半拍，窗口一动 mousemove 就被节流）。
 
    交互区（按钮、城市、搜索层、搜索结果）不能当拖动手柄。 */
-const NO_DRAG = "button, a, input, #search, #cityBtn, .acts, .city, .r";
+const NO_DRAG = "button, a, input, #search, #cityBtn, .acts, .city, .r, .rz";
 let pressing = false;
 
 function endPress() {
@@ -1533,6 +1556,19 @@ window.addEventListener("mousedown", (e) => {
   document.body.classList.add("press-lock");   /* 拖窗口时别选中文字 */
   if (window.wgt && window.wgt.dragBegin) window.wgt.dragBegin();
 }, true);
+
+/* 四角缩放：只报"从哪个角开始/结束"，尺寸由主进程跟光标算 */
+document.querySelectorAll(".rz").forEach((el) => {
+  el.addEventListener("mousedown", (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (window.wgt && window.wgt.resizeBegin) window.wgt.resizeBegin(el.dataset.c);
+  });
+});
+const endResize = () => { if (window.wgt && window.wgt.resizeEnd) window.wgt.resizeEnd(); };
+window.addEventListener("mouseup", endResize);
+window.addEventListener("blur", endResize);
 
 window.addEventListener("mouseup", () => endPress());
 window.addEventListener("blur", () => endPress());
