@@ -40,7 +40,9 @@
   /* ---------- 卡片 ---------- */
   .card{
     position:absolute; inset:0;
-    border-radius:10px;
+    /* 圆角 10 → 18：10px 在 286px 宽的卡上几乎看不出圆，四角显得"方"；
+       18px 和倒计时卡（30px，但它更小）观感接近。窗口区域半径要跟着一起改。 */
+    border-radius:18px;
     padding:15px 17px 13px;
     display:flex; flex-direction:column;
     overflow:hidden;
@@ -55,7 +57,7 @@
 
     box-shadow:
       inset 0 1px 0 rgba(255,255,255,.30),
-      inset 0 0 0 1px rgba(255,255,255,.16);
+      inset 0 0 0 1px rgba(255,255,255,.10);
 
     /* 拖动由页面自己报（见脚本末尾"拖动窗口"）：卡片在桌面层里是 Progman 的
        子窗口，系统这套 -webkit-app-region: drag 在子窗口上不生效 —— 按住拖

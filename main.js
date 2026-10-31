@@ -381,11 +381,28 @@ const _rgn = (() => {
     const u = k.load("user32.dll"), g = k.load("gdi32.dll");
     return {
       SetWindowRgn: u.func("SetWindowRgn", "int", ["void *", "void *", "bool"]),
+      GetWindowRgn: u.func("GetWindowRgn", "int", ["void *", "void *"]),
       CreateRoundRectRgn: g.func("CreateRoundRectRgn", "void *", ["int", "int", "int", "int", "int", "int"]),
       DeleteObject: g.func("DeleteObject", "bool", ["void *"]),
     };
   } catch (e) { return null; }
 })();
+
+/* 区域看门狗：任何原因导致窗口区域丢失（SetParent、样式重建、全屏切换…），
+   2 秒内补回来。倒计时卡同款，代价极小（一次 GetWindowRgn 调用）。 */
+function startRegionWatch() {
+  if (!_rgn || !_rgn.GetWindowRgn) return;
+  setInterval(() => {
+    const w = weatherWin;
+    if (!w || w.isDestroyed()) return;
+    try {
+      const probe = _rgn.CreateRoundRectRgn(0, 0, 1, 1, 1, 1);
+      const had = _rgn.GetWindowRgn(hwndNum(w), probe);
+      _rgn.DeleteObject(probe);
+      if (had === 0) { applyCardRegion(w); evlogSafe("region restored"); }
+    } catch (e) {}
+  }, 2000);
+}
 
 function applyCardRegion(w) {
   if (!_rgn || !w || w.isDestroyed()) return;
@@ -402,7 +419,7 @@ function applyCardRegion(w) {
      磨砂模式 PAD 本来就是 0，所以只有"贴进桌面"这条路上会犯。 */
   const m = 0;
   const W = Math.round(b.width * dpi), H = Math.round(b.height * dpi);
-  const rad = Math.max(2, Math.round(10 * s));   /* CSS border-radius:10px */
+  const rad = Math.max(2, Math.round(18 * s));   /* CSS border-radius:18px，必须一致 */
   let hrgn = 0;
   try {
     /* ★ 最后两个参数是"椭圆的长和宽"，圆角半径 = 值 / 2。
@@ -410,7 +427,11 @@ function applyCardRegion(w) {
        四个角会露出一条弧形缝（拖动时缝里是底下的桌面快照）。 */
     hrgn = Number(_rgn.CreateRoundRectRgn(
       m, m, W - m + 1, H - m + 1, rad * 2, rad * 2));
-    if (hrgn) _rgn.SetWindowRgn(hwndOf(w), hrgn, true);
+    /* ★ 原来写的是 hwndOf(w) —— 这个函数在天气卡里根本不存在，
+       于是这里每次抛 ReferenceError、被 catch 吞掉，SetWindowRgn 从没执行过。
+       圆角区域一直是"没设置"，窗口就是直角 → 四角露出 #bd 快照的浅色边。
+       （1.1.0 那次改 rad*2 逻辑是对的，但函数在到达这一行之前就挂了。） */
+    if (hrgn) _rgn.SetWindowRgn(hwndNum(w), hrgn, true);
   } catch (e) {}
 }
 
@@ -941,11 +962,21 @@ function createWindow() {
       if (now) dl.raise();
     }, 120);
   }
+  /* 区域看门狗：启动后就跑，任何原因丢了圆角都在 2 秒内补回来 */
+  startRegionWatch();
+
   /* 勾了「窗口置顶」就不进桌面层（子窗口置顶无效，两者互斥） */
   if (dl.available && desktopLayerOn() && !top) {
     w.once("show", () => setTimeout(() => {
       if (!desktopLayerOn()) return;
-      dl.set(true).then((ok) => evlogSafe("dlayer startup " + ok));
+      dl.set(true).then((ok) => {
+        evlogSafe("dlayer startup " + ok);
+        /* ★ SetParent 挂进 Progman 会把窗口区域清掉（实测 GetWindowRgn 从 2 变 0），
+           不补回来窗口就是直角 —— 四角露出 #bd 快照那层浅色边（用户截图那个）。
+           倒计时卡早就有这段补刀，天气卡一直缺。 */
+        try { applyCardRegion(w); } catch (e) {}
+        setTimeout(() => { try { applyCardRegion(w); } catch (e) {} }, 400);
+      });
     }, 700));
   }
   if (dl.available) {

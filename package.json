@@ -1,7 +1,7 @@
 {
   "name": "weather-card",
   "productName": "WeatherCard",
-  "version": "1.1.1",
+  "version": "1.2.0",
   "description": "天气卡片 —— 桌面磨砂玻璃天气小卡（Electron 独立版）",
   "author": {
     "name": "WeatherWidget Contributors"
