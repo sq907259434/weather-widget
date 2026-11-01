@@ -2,7 +2,7 @@
    从合体版「WeatherWidget 1.9.1」拆出：本应用只带天气一张卡。
    透明无边框窗口 + 可拖动 + 记忆位置 + 右键菜单 + IP 定位 */
 
-const { app, BrowserWindow, ipcMain, Menu, screen, globalShortcut } = require("electron");
+const { app, BrowserWindow, ipcMain, Menu, screen } = require("electron");
 const path = require("path");
 const fs = require("fs");
 const { execFile } = require("child_process");
@@ -122,23 +122,64 @@ function patchState(patch) {
   writeState(s);
 }
 
-/* 贴进桌面层（state.desktopLayer）：窗口层级放在启动时做，切换就重启自己。
-   万一贴进去看不见，按 Ctrl+Alt+2 = 把状态改回 false 再重启，窗口一定回来。
-
-   ★ 默认开（1.3.1 起）：不贴进桌面的话，Win+D「显示桌面」会把卡片一起收走 ——
-     用户看到的就是"卡片自己消失了"。贴进 Progman 之后和桌面图标同层，Win+D 不动。
-     只有显式存过 false 的老用户才会留在普通窗口模式（不去覆盖他们已有的选择）。 */
-function desktopLayerOn() {
-  try { return readState().desktopLayer !== false; } catch (e) { return true; }
+/* ---------- 重启自己 ----------
+   ★ 便携版绝对不能用裸的 app.relaunch()：那是重跑 process.execPath，
+     而便携版实际跑的是 %TEMP% 里解出来的副本 —— 启动器一看到子进程退出
+     就把临时目录删掉，重启出来的进程找不到 exe 直接死掉。
+     用户看到的就是"点一下卡片就消失了"（实测：Ctrl+Alt+2 之后进程从 4 变 0，
+     日志里没有任何新记录）。
+     electron-builder 的 portable 运行器给了 PORTABLE_EXECUTABLE_FILE（原始 exe 路径），
+     优先用它重启；安装版没有这个变量，退回默认行为。 */
+function relaunchSelf() {
+  const portable = process.env.PORTABLE_EXECUTABLE_FILE;
+  try {
+    if (portable) app.relaunch({ execPath: portable, args: [] });
+    else app.relaunch();
+  } catch (e) {
+    try { app.relaunch(); } catch (e2) {}
+  }
+  app.exit(0);
 }
 
-function toggleDesktopLayer(want) {
+/* ---------- 常驻桌面（不再是个选项） ----------
+   卡片默认就贴在桌面层（Progman 的子窗口）：和桌面图标同层，Win+D 不会把它收走，
+   有窗口盖住时自然被盖住 —— 这正是"桌面挂件"该有的行为。
+   唯一的开关是「窗口置顶」：置顶 = 脱离桌面层、浮在所有窗口最前面。
+   两者天然互斥（子窗口不能置顶），所以桌面层直接由 top 推导，不单独存。 */
+function desktopLayerOn() {
+  try { return readState().top !== true; } catch (e) { return true; }
+}
+
+/* 切换"是否所有窗口置顶"：运行中直接切，不重启。
+   常驻桌面 = Progman 的子窗口（Win+D 不动）；置顶 = 脱离桌面层、浮在最前。
+   两步都能在运行时完成：
+     · 常驻 → 置顶：先 DL.set(false) 把父子关系摘掉，再 setAlwaysOnTop；
+     · 置顶 → 常驻：先撤置顶，再 DL.set(true) 挂回桌面层。
+   页面也要跟着换模式（body.dlayer 决定 #bd 快照画不画），所以切完发一条 IPC。 */
+async function setTopLive(want) {
   const on = !!want;
-  const cur = desktopLayerOn();
-  patchState(on ? { desktopLayer: true, top: false } : { desktopLayer: false });
+  const cur = readState().top === true;
   if (cur === on) return on;
-  app.relaunch();
-  app.exit(0);
+  patchState({ top: on });
+  const w = weatherWin;
+  if (!w || w.isDestroyed()) return on;
+
+  const tellPage = () => { try { w.webContents.send("wgt:dlayer", !on); } catch (e) {} };
+
+  if (on) {
+    /* 常驻 → 置顶：先摘父子关系，再置顶 */
+    try { if (DL && DL.isOn && DL.isOn()) await DL.set(false); } catch (e) {}
+    try { w.setAlwaysOnTop(true, "floating"); } catch (e) {}
+    tellPage();
+    applyCardRegion(w);
+  } else {
+    /* 置顶 → 常驻：先撤置顶，再挂回桌面层 */
+    try { w.setAlwaysOnTop(false); } catch (e) {}
+    try { if (DL && DL.available) await DL.set(true); } catch (e) {}
+    tellPage();
+    applyCardRegion(w);
+  }
+  appendLog("top switch -> " + on + " (live)");
   return on;
 }
 
@@ -1275,27 +1316,7 @@ async function buildMenu() {
     { label: "刷新天气", accelerator: "F5", click: () => weatherWin && weatherWin.webContents.send("wgt:refresh") },
     { label: "搜索城市…", click: () => weatherWin && weatherWin.webContents.send("wgt:search-open") },
     { label: "回到自动定位", click: () => weatherWin && weatherWin.webContents.send("wgt:relocate") },
-    { label: "外观设置（透明度 / 磨砂）", click: () => weatherWin && weatherWin.webContents.send("wx:show-look") },
-    { label: "刷新桌面背景", click: () => refreshSnapshot("menu") },
-    { type: "separator" },
-    {
-      /* 档位给固定的几个就够；微调用这里的放大/缩小或 Ctrl+Alt+↑↓。
-         注意：桌面层模式下 Ctrl+滚轮收不到 —— Windows 只把滚轮消息发给
-         拥有焦点的窗口，而贴进桌面的卡片是 Progman 的子窗口、拿不到焦点。
-         所以主入口做成菜单项 + 全局快捷键，这两个不依赖焦点。 */
-      label: `卡片大小（当前 ${Math.round(currentScale() * 100)}%）`,
-      submenu: [
-        { label: "放大 5%", click: () => applyScale(scaleNow + SCALE_STEP) },
-        { label: "缩小 5%", click: () => applyScale(scaleNow - SCALE_STEP) },
-        { type: "separator" },
-        ...[0.7, 0.8, 0.9, 1, 1.15, 1.3, 1.5].map((z) => ({
-          label: Math.round(z * 100) + "%" + (z === 1 ? "（标准）" : ""),
-          type: "radio",
-          checked: Math.abs(currentScale() - z) < 0.005,
-          click: () => applyScale(z),
-        })),
-      ],
-    },
+    { label: "外观设置（透明度）", click: () => weatherWin && weatherWin.webContents.send("wx:show-look") },
     { type: "separator" },
     {
       label: "桌面右键菜单显示",
@@ -1314,35 +1335,12 @@ async function buildMenu() {
     },
     { type: "separator" },
     {
-      label: "贴进桌面（和桌面图标同层）",
-      type: "checkbox",
-      checked: desktopLayerOn(),      /* 默认开：不贴的话 Win+D 会把卡片一起收走 */
-      click: (item) => { toggleDesktopLayer(item.checked); },
-    },
-    {
-      label: "窗口置顶（会脱离桌面层）",
+      label: "所有窗口置顶（关掉就常驻桌面）",
       type: "checkbox",
       checked: onTop,
-      click: async (item) => {
-        patchState({ top: item.checked });
-        const w = weatherWin;
-        if (!w || w.isDestroyed()) return;
-        /* 贴进桌面层时是 Progman 的子窗口，setAlwaysOnTop 对子窗口无效 ——
-           要真浮到最前必须先脱离桌面层（两者天然互斥）。 */
-        if (item.checked) {
-          patchState({ desktopLayer: false });
-          try { if (DL && DL.isOn && DL.isOn()) await DL.set(false); } catch (e) {}
-          try { w.setAlwaysOnTop(true, "floating"); } catch (e) {}
-        } else {
-          /* ★ 取消置顶只该「撤掉置顶」，不该顺手把卡片塞进桌面层。
-             原来这里是 patchState({desktopLayer:true}) + 运行中 DL.set(true)：
-               ① 用户只是想取消置顶，状态却被改成"贴进桌面"，下次启动一直在桌面层；
-               ② live SetParent 进 Progman 时 acrylic 还开着，而桌面层子窗口没有
-                  系统磨砂 —— 卡片当场变成一块灰底（文档里记的那个症状）。
-             现在的行为：撤置顶 → 沉底，回到"安静待在桌面上"的默认状态。 */
-          try { w.setAlwaysOnTop(false); } catch (e) {}
-          setTimeout(() => sinkWin(w), 60);
-        }
+      click: (item) => {
+        /* 运行中直接切，不重启（重启会闪一下，用户明确不要） */
+        setTopLive(item.checked);
       },
     },
     { type: "separator" },
@@ -1365,26 +1363,17 @@ app.whenReady().then(() => {
   PAD = 0;   /* 见文件头 PAD 的说明：窗口恒等于卡片尺寸 */
   maybeMigrateLegacy();
   createWindow();
+  /* 记一行启动环境：便携版必须靠 PORTABLE_EXECUTABLE_FILE 才能正确重启自己
+     （裸 app.relaunch 重跑的是 %TEMP% 里的临时副本，重启必挂） */
+  appendLog("start portable=" + (process.env.PORTABLE_EXECUTABLE_FILE ? "yes" : "no") +
+            " exec=" + process.execPath);
   startDesktopWatch();   /* 桌面上松开左键 / 20 秒兜底 → 重抓快照 */
   registerImeIpc();      /* 桌面层里子窗口拿不到键盘焦点，搜索框靠幽灵输入窗代收 */
 
-  /* 快捷键兜底：贴进桌面后万一看不见，Ctrl+Alt+2 一键切回普通窗口（会重启自己） */
-  try {
-    globalShortcut.register("Control+Alt+2", () => toggleDesktopLayer(!desktopLayerOn()));
-  } catch (e) { /* 注册失败不影响其它功能 */ }
-
-  /* 缩放快捷键：Ctrl+Alt+↑ 放大 / Ctrl+Alt+↓ 缩小（5% 一档）。
-     桌面层里卡片拿不到焦点，滚轮消息根本不会投给它，所以必须走全局快捷键。 */
-  const zoomKeys = [
-    ["Control+Alt+Up", SCALE_STEP],
-    ["Control+Alt+Down", -SCALE_STEP],
-  ];
-  for (const [acc, delta] of zoomKeys) {
-    try {
-      const ok = globalShortcut.register(acc, () => applyScale(scaleNow + delta));
-      scaleLog("hotkey " + acc + " = " + ok);
-    } catch (e) { scaleLog("hotkey " + acc + " threw " + e.message); }
-  }
+  /* ★ 不再注册任何全局快捷键：Ctrl+Alt+2 / Ctrl+Alt+↑↓ 这类东西没人记得住，
+     而且会和其他软件抢按键。所有操作都走右键菜单：
+       置顶/常驻桌面 → 菜单里勾；卡片大小 → 菜单里的档位和 ±5%。
+     （桌面层里卡片拿不到键盘焦点，所以菜单是唯一入口 —— 本来就是这样。） */
 
   const senderWin = (e) => BrowserWindow.fromWebContents(e.sender);
 
@@ -1500,6 +1489,3 @@ app.whenReady().then(() => {
 
 app.on("window-all-closed", () => { app.quit(); });
 
-app.on("will-quit", () => {
-  try { globalShortcut.unregisterAll(); } catch (e) { /* 无所谓 */ }
-});

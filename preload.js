@@ -36,6 +36,8 @@ contextBridge.exposeInMainWorld("wgt", {
   /* 桌面快照背景（与待办卡同款）：主进程裁好一块推过来 */
   backdropNow: () => ipcRenderer.invoke("wgt:backdrop-now"),
   onBackdrop: (fn) => ipcRenderer.on("wgt:backdrop", (_e, p) => fn(p || {})),
+  /* 运行中切换 常驻桌面 / 置顶 时通知页面换模式（决定 #bd 快照画不画） */
+  onDlayer: (fn) => ipcRenderer.on("wgt:dlayer", (_e, v) => fn(!!v)),
   /* 拖动实况：整幅快照 + 每 tick 窗口坐标（png 转 Uint8Array 才能过 contextBridge） */
   onBdFull: (fn) => ipcRenderer.on("wgt:bd-full", (_e, p) => fn(p && { ...p, png: new Uint8Array(p.png) })),
   onBdPos: (fn) => ipcRenderer.on("wgt:bd-pos", (_e, p) => fn(p || {})),

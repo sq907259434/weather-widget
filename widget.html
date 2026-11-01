@@ -348,7 +348,11 @@
        露出来 —— 就是用户截到的"四角各有一个浅色方块"。
        在这里用 clip-path 兜底：快照比卡片大 22px，所以往里收 22px 再圆角 18px，
        正好和卡片轮廓重合，四角变透明（露出后面的桌面）。 */
-    clip-path:inset(22px 22px 22px 22px round 18px);
+    /* ★ 裁切量必须等于"快照比窗口多出去的那一圈"，由 setBackdrop 按实际值写进
+       --bd-pad。原来写死 22px，但实际是 BD_PAD(44 物理px) ÷ (dpi×zoom) ≈ 22.7px：
+       差这 0.7px，快照的圆角弧就比卡片的弧外偏一点，四个角露出弧形毛边 ——
+       在壁纸上看不出来（同色），压在别的窗口上才明显。 */
+    clip-path:inset(var(--bd-pad, 22px 22px) round 18px);
     background-size:cover; background-position:center;
     opacity:0; transition:opacity .25s ease;
     filter:blur(var(--frost));
@@ -360,6 +364,11 @@
      border-radius 做抗锯齿过渡，看不出边缘，也没有锯齿。
      前提是 #bd 有内容；抓不到快照时主进程会自动退回硬裁（宁可锯齿，不能黑角）。 */
   body.dlayer #bd{ clip-path:none; }
+  /* ★ 置顶模式（不在桌面层）：窗口本身就是 per-pixel 透明，露出来的就是背后真实的
+     窗口/桌面 —— 不需要快照，圆角只由 .card 的 border-radius 抗锯齿，一定干净。
+     快照只有在桌面层里才有意义（子窗口透不出后面的窗口，只能垫一张图）。
+     代价：置顶模式下「磨砂」滑杆无效（它模糊的就是这张快照），透明度滑杆照常有效。 */
+  body:not(.dlayer) #bd{ display:none; }
   /* 拖动中不藏快照：主进程在起拖时抓了一张"无卡片"的干净全屏快照，
      拖动中按新位置实时重裁推送（见 main.js dragBegin）。必须垫着它 ——
      窗口被 region 裁剪后，半透明像素合成不出透明度：快照层一旦缺席，
@@ -475,8 +484,6 @@
   </div>
   <label class="lkrow"><span>透明度</span>
     <input id="lkAlpha" type="range" min="0" max="90" step="1"><b id="lkAlphaV"></b></label>
-  <label class="lkrow"><span>磨砂</span>
-    <input id="lkFrost" type="range" min="0" max="20" step="1"><b id="lkFrostV"></b></label>
   <div class="lktip">透明度拉高会透出桌面快照；图标挪过 / 换壁纸后，右键 → 刷新桌面背景</div>
 </div>
 
@@ -1338,16 +1345,18 @@ if (window.wgt && window.wgt.onLook) {
 function applyLook() {
   const r = document.documentElement.style;
   r.setProperty("--a", String(LOOK.alpha));
-  r.setProperty("--frost", LOOK.frost + "px");
+  /* ★ 磨砂已按用户要求彻底关掉：快照永远不模糊（-frost 强制 0）。
+     原来这里读 LOOK.frost，用户把滑杆拉到 16px 后整张卡就是一片糊 ——
+     桌面挂件要的是"看清桌面"，不是"隔着毛玻璃看"。 */
+  r.setProperty("--frost", "0px");
 }
 
 function lookUI() {
-  const ai = $("lkAlpha"), fi = $("lkFrost");
-  if (!ai || !fi) return;
+  /* 磨砂滑杆已删除（磨砂整体关掉了），面板只剩透明度 */
+  const ai = $("lkAlpha");
+  if (!ai) return;
   ai.value = String(Math.round((1 - LOOK.alpha) * 100));
-  fi.value = String(Math.round(LOOK.frost));
   $("lkAlphaV").textContent = ai.value + "%";
-  $("lkFrostV").textContent = fi.value + "px";
 }
 
 let lookSaveTimer = null;
@@ -1371,18 +1380,12 @@ function closeLook() {
 }
 
 function bindLook() {
-  const ai = $("lkAlpha"), fi = $("lkFrost");
-  if (!ai || !fi) return;
+  const ai = $("lkAlpha");
+  if (!ai) return;
   ai.addEventListener("input", () => {
     LOOK.alpha = Math.min(1, Math.max(0.1, 1 - Number(ai.value) / 100));
     applyLook();
     $("lkAlphaV").textContent = ai.value + "%";
-    saveLookSoon();
-  });
-  fi.addEventListener("input", () => {
-    LOOK.frost = Math.min(20, Math.max(0, Number(fi.value) || 0));
-    applyLook();
-    $("lkFrostV").textContent = fi.value + "px";
     saveLookSoon();
   });
   $("lkBtn").addEventListener("click", closeLook);
@@ -1392,6 +1395,12 @@ function bindLook() {
 function setBackdrop(p) {
   const bd = $("bd");
   if (!p || !p.url) { document.body.classList.remove("has-bd"); return; }
+  /* 快照比窗口多出去的那一圈（CSS px）：left/top 是负的，取反就是内缩量。
+     裁切必须用它，写死 22px 会在四个角露出弧形毛边（见 CSS 里 #bd 的注释）。 */
+  try {
+    const pl = Math.max(0, -Number(p.left) || 0), pt = Math.max(0, -Number(p.top) || 0);
+    document.documentElement.style.setProperty("--bd-pad", pt.toFixed(2) + "px " + pl.toFixed(2) + "px");
+  } catch (e) {}
   bd.style.backgroundImage = "url(" + p.url + ")";
   bd.style.backgroundSize = "100% 100%";   /* 裁块与元素同尺寸，1:1 铺（拖动后会从这里复位） */
   bd.style.left = p.left + "px";
@@ -1565,6 +1574,8 @@ document.addEventListener("visibilitychange", () => {
 document.body.classList.add(window.wgt && window.wgt.acrylic ? "acrylic" : "solid");
 /* 贴进桌面层：让 #bd 快照铺满整窗，圆角外那圈显示成桌面本身（见 CSS 里 body.dlayer） */
 if (window.wgt && window.wgt.dlayer) document.body.classList.add("dlayer");
+/* 运行中切换 常驻桌面 / 置顶：跟着换模式（置顶模式不画快照，走真透明） */
+if (window.wgt && window.wgt.onDlayer) window.wgt.onDlayer((v) => document.body.classList.toggle("dlayer", v));
 
 /* 鼠标指上来就临时浮到最前，移开还原：两张卡是两个窗口，被另一张压住时
    不抬升就只能先点一下才看得见。临时状态，不改用户设的"窗口置顶"。 */
