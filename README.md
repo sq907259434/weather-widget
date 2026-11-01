@@ -1,7 +1,6 @@
 # 天气卡片 · WeatherCard
 
-> 贴在 Windows 桌面上的天气小卡。自动定位，不抢焦点，不占任务栏。
-> 本项目原是「桌面卡片套件」（天气 + 待办合体，1.9.1 为最后合体版），现已拆分为天气 / 待办 / 倒计时三个独立应用，各自发布。
+> 贴在 Windows 桌面上的天气小卡。自动定位，不抢焦点，不占任务栏，单文件免安装。
 
 ![截图](docs/screenshot.png)
 
@@ -28,7 +27,7 @@
 
 > 未做代码签名，Windows SmartScreen 可能提示"未知发布者"，点「更多信息 → 仍要运行」即可。
 
-> **从合体版升级**：首次启动会自动把合体版（1.9.1 及以前）记住的窗口位置、置顶状态搬过来，不用重新摆。
+> **从旧版本升级**：首次启动会自动把之前版本记住的窗口位置、置顶状态搬过来，不用重新摆。
 
 ## 使用
 
@@ -150,7 +149,7 @@ export ELECTRON_BUILDER_BINARIES_MIRROR="https://registry.npmmirror.com/-/binary
 
 ```
 weather-widget/
-├── main.js            # 主进程：窗口、Acrylic、位置记忆、右键菜单、IP 归属查询、合体版数据迁移
+├── main.js            # 主进程：窗口、位置记忆、右键菜单、IP 归属查询、旧版本数据迁移
 ├── preload.js         # contextBridge 暴露的最小接口
 ├── widget.html        # 天气卡：全部界面与逻辑（单文件，无框架、无构建步骤）
 ├── icon.png / icon.ico
